@@ -3316,7 +3316,9 @@ export function AgentKitComposer({
         onSubmit={async (text, files, references, options) => {
           if (disabled) {
             onDisabledClick?.();
-            return;
+            // Throw so the composer keeps the draft; returning would read as
+            // success and clear text that was never submitted.
+            throw new Error();
           }
           focusComposer();
           try {

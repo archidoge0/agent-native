@@ -22,6 +22,7 @@ const chatMocks = vi.hoisted(() => ({
   rootProps: null as any,
   chatProps: null as any,
   composerProps: null as any,
+  history: undefined as any,
   resumeProps: null as any,
   failureProps: null as any,
   failureError: { code: "test-error", message: "Run failed" } as any,
@@ -231,7 +232,7 @@ vi.mock("./agentkit-chat/history.js", async () => {
     AgentKitDevCheckpointProvider: ({ children }: any) =>
       React.createElement(React.Fragment, null, children),
     AgentKitDevCheckpointRestore: () => null,
-    useOptionalAgentKitHistory: () => undefined,
+    useOptionalAgentKitHistory: () => chatMocks.history,
   };
 });
 
@@ -557,6 +558,7 @@ beforeEach(() => {
   chatMocks.rootProps = null;
   chatMocks.chatProps = null;
   chatMocks.composerProps = null;
+  chatMocks.history = undefined;
   chatMocks.resumeProps = null;
   chatMocks.failureProps = null;
   chatMocks.failureError = { code: "test-error", message: "Run failed" };
@@ -1697,6 +1699,70 @@ describe("AgentKitAssistantChat host behavior", () => {
     expect(chatMocks.transportOptions.scope).toEqual({
       type: "workspace-app",
       id: "app-two",
+    });
+  });
+
+  describe("with chat history", () => {
+    const renderWithHistory = async (
+      beginSubmission: () => Promise<unknown>,
+    ) => {
+      chatMocks.history = {
+        isRestoring: false,
+        isSubmissionInFlight: false,
+        beginSubmission,
+      };
+      container = document.createElement("div");
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => {
+        root.render(<AgentKitAssistantChat {...baseProps()} />);
+      });
+    };
+
+    it("reserves and releases the submission inside onSubmit, not before it", async () => {
+      const release = vi.fn();
+      const beginSubmission = vi.fn(async () => release);
+      await renderWithHistory(beginSubmission);
+
+      // A pre-submit reservation flips the composer's `disabled` prop before
+      // onSubmit runs; a synchronous commit then drops the message silently and
+      // leaves the composer latched disabled.
+      expect(chatMocks.composerProps.onBeforeSubmit).toBeUndefined();
+      expect(beginSubmission).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await chatMocks.composerProps.onSubmit("Hello", [], [], {});
+      });
+
+      expect(beginSubmission).toHaveBeenCalledOnce();
+      expect(chatMocks.control.sendMessage).toHaveBeenCalledOnce();
+      expect(release).toHaveBeenCalledOnce();
+    });
+
+    it("releases the reservation when dispatch fails", async () => {
+      const release = vi.fn();
+      await renderWithHistory(async () => release);
+      chatMocks.control.sendMessage.mockRejectedValueOnce(new Error("boom"));
+
+      await act(async () => {
+        await expect(
+          chatMocks.composerProps.onSubmit("Hello", [], [], {}),
+        ).rejects.toThrow("boom");
+      });
+
+      expect(release).toHaveBeenCalledOnce();
+    });
+
+    it("rejects instead of silently succeeding when no reservation is granted", async () => {
+      await renderWithHistory(async () => null);
+
+      await act(async () => {
+        await expect(
+          chatMocks.composerProps.onSubmit("Keep me", [], [], {}),
+        ).rejects.toThrow();
+      });
+
+      expect(chatMocks.control.sendMessage).not.toHaveBeenCalled();
     });
   });
 

@@ -475,7 +475,6 @@ interface AgentKitSurfaceContextValue {
   onTextChange: (text: string) => void;
   onRemoveContextItem: (key: string) => void;
   onClearSelection: () => void;
-  onBeforeSubmit: () => Promise<boolean>;
   onSubmit: PromptComposerProps["onSubmit"];
   sendMessage: (
     text: string,
@@ -1201,7 +1200,6 @@ const AgentKitAssistantChatBody = forwardRef<
   const lastSavedThreadDataRef = useRef<string | null>(null);
   const saveSnapshotRef = useRef<() => void>(() => undefined);
   const isUnmountingRef = useRef(false);
-  const pendingSubmissionReleaseRef = useRef<(() => void) | null>(null);
   const localSubmissionRef = useRef(false);
   const latestAssistant = useMemo(
     () =>
@@ -1726,14 +1724,6 @@ const AgentKitAssistantChatBody = forwardRef<
     threadId,
   ]);
 
-  const beforeSubmit = useCallback(async () => {
-    const release = await acquireSubmission();
-    if (!release) return false;
-    pendingSubmissionReleaseRef.current?.();
-    pendingSubmissionReleaseRef.current = release;
-    return true;
-  }, [acquireSubmission]);
-
   const dispatch = useCallback(
     async (
       text: string,
@@ -1920,17 +1910,20 @@ const AgentKitAssistantChatBody = forwardRef<
       references: Reference[],
       composerOptions: PromptComposerSubmitOptions,
     ) => {
-      let release: (() => void) | null = pendingSubmissionReleaseRef.current;
-      pendingSubmissionReleaseRef.current = null;
-      if (!release) release = await acquireSubmission();
-      if (!release) return;
+      // Reserve and release inside this one call. Reserving earlier (in an
+      // onBeforeSubmit hook) flips the composer's `disabled` prop before this
+      // handler runs, and a synchronous commit then makes the composer drop the
+      // message while leaking the reservation.
+      const release = await acquireSubmission();
+      // An empty error keeps the draft and shows the composer's generic retry.
+      if (!release) throw new Error();
       try {
         await dispatch(text, files, references, composerOptions);
       } catch (error) {
         dispatchSetupRequiredEvent(error, props.tabId, threadId);
         throw error;
       } finally {
-        release?.();
+        release();
       }
     },
     [acquireSubmission, dispatch, props.tabId, threadId],
@@ -2433,14 +2426,6 @@ const AgentKitAssistantChatBody = forwardRef<
     setPendingProviderSubmissionVersion((version) => version + 1);
   }, [deferredProviderSubmissionFailureId, threadId]);
 
-  useEffect(
-    () => () => {
-      pendingSubmissionReleaseRef.current?.();
-      pendingSubmissionReleaseRef.current = null;
-    },
-    [],
-  );
-
   const setContextItem = useCallback(
     (rawItem: AgentChatContextItem, focus = true) => {
       const item = normalizeAgentChatContextItem(rawItem);
@@ -2541,7 +2526,6 @@ const AgentKitAssistantChatBody = forwardRef<
       },
     }),
     [
-      beforeSubmit,
       contextItems,
       implementPlan,
       props.apiUrl,
@@ -2594,7 +2578,6 @@ const AgentKitAssistantChatBody = forwardRef<
     onTextChange: onComposerTextChange,
     onRemoveContextItem: removeContextItem,
     onClearSelection: requestPendingSelectionClear,
-    onBeforeSubmit: beforeSubmit,
     onSubmit: submitPrepared,
     sendMessage: send,
     sendRecoveryMessage,
@@ -3113,7 +3096,6 @@ function AgentKitComposerSurface({
   onTextChange,
   onRemoveContextItem,
   onClearSelection,
-  onBeforeSubmit,
   onSubmit,
   submitSuggestion,
   onImplementPlan,
@@ -3143,7 +3125,6 @@ function AgentKitComposerSurface({
   onTextChange: (text: string) => void;
   onRemoveContextItem: (key: string) => void;
   onClearSelection: () => void;
-  onBeforeSubmit: () => Promise<boolean>;
   onSubmit: PromptComposerProps["onSubmit"];
   threadRestore:
     | { status: "ready" | "loading" }
@@ -3298,7 +3279,6 @@ function AgentKitComposerSurface({
           initialText={text}
           initialTextKey={`${props.tabId ?? threadId}:${prefillRevision}`}
           onTextChange={onTextChange}
-          onBeforeSubmit={onBeforeSubmit}
           contextItems={contextItems}
           onRemoveContextItem={onRemoveContextItem}
           interceptBuildRequestsForBuilder={isInBuilderFrame()}
