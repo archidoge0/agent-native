@@ -1,0 +1,104 @@
+name: GHAV Agent Native 3925 ours
+
+on:
+  push:
+    branches:
+      - codex/ghav-agent-native3925-ours
+
+permissions:
+  contents: read
+
+env:
+  MOBILE_APP_PATH: packages/mobile-app
+  CI: '1'
+  AGENT_NATIVE_MOBILE_DISABLE_APP_EXTENSIONS: '1'
+  AGENT_NATIVE_MOBILE_DISABLE_REMOTE_PUSH: '1'
+
+jobs:
+  android:
+    name: Android debug build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - name: Checkout pinned Before source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 050fffb438a109b6b62c22952ef97ee0b22d21a6
+          persist-credentials: false
+      - name: Verify source snapshot
+        run: |
+          test "$(git rev-parse HEAD)" = '050fffb438a109b6b62c22952ef97ee0b22d21a6'
+          test "$(git rev-parse HEAD^{tree})" = '18790a35f0578e73d30d6106e1659c76b4946ac6'
+      - name: Set up source pnpm
+        uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
+      - name: Set up Node 22.23.3
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.23.3'
+          cache: pnpm
+      - name: Verify source tool versions
+        run: |
+          test "$(node --version)" = 'v22.23.3'
+          test "$(pnpm --version)" = '10.29.1'
+      - name: Install complete source dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Generate Android project
+        working-directory: packages/mobile-app
+        run: pnpm exec expo prebuild --platform android --no-install
+      - name: Export Android production bundle
+        working-directory: packages/mobile-app
+        run: pnpm exec expo export --platform android --output-dir .expo-ci-export
+      - name: Record android export identity
+        working-directory: packages/mobile-app
+        run: |
+          find .expo-ci-export -type f -print0 | sort -z | xargs -0 sha256sum > /tmp/ghav-android-export-manifest
+          test -s /tmp/ghav-android-export-manifest
+          echo "GHAV_ANDROID_EXPORT_FILES=$(wc -l < /tmp/ghav-android-export-manifest)"
+          echo "GHAV_ANDROID_EXPORT_SHA=$(sha256sum /tmp/ghav-android-export-manifest | awk '{print $1}')"
+      - name: Compile Android debug APK
+        working-directory: packages/mobile-app/android
+        run: ./gradlew :app:assembleDebug --no-daemon
+      - name: Record APK identity
+        working-directory: packages/mobile-app
+        run: |
+          find android/app/build/outputs/apk -type f -name '*.apk' -print0 | sort -z | xargs -0 sha256sum > /tmp/ghav-apk-manifest
+          test -s /tmp/ghav-apk-manifest
+          echo "GHAV_APK_FILES=$(wc -l < /tmp/ghav-apk-manifest)"
+          echo "GHAV_APK_SHA=$(sha256sum /tmp/ghav-apk-manifest | awk '{print $1}')"
+  ios:
+    name: iOS production bundle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout pinned Before source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 050fffb438a109b6b62c22952ef97ee0b22d21a6
+          persist-credentials: false
+      - name: Verify source snapshot
+        run: |
+          test "$(git rev-parse HEAD)" = '050fffb438a109b6b62c22952ef97ee0b22d21a6'
+          test "$(git rev-parse HEAD^{tree})" = '18790a35f0578e73d30d6106e1659c76b4946ac6'
+      - name: Set up source pnpm
+        uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
+      - name: Set up Node 22.23.3
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.23.3'
+          cache: pnpm
+      - name: Verify source tool versions
+        run: |
+          test "$(node --version)" = 'v22.23.3'
+          test "$(pnpm --version)" = '10.29.1'
+      - name: Install complete source dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Export iOS production bundle
+        working-directory: packages/mobile-app
+        run: pnpm exec expo export --platform ios --output-dir .expo-ci-export
+      - name: Record ios export identity
+        working-directory: packages/mobile-app
+        run: |
+          find .expo-ci-export -type f -print0 | sort -z | xargs -0 sha256sum > /tmp/ghav-ios-export-manifest
+          test -s /tmp/ghav-ios-export-manifest
+          echo "GHAV_IOS_EXPORT_FILES=$(wc -l < /tmp/ghav-ios-export-manifest)"
+          echo "GHAV_IOS_EXPORT_SHA=$(sha256sum /tmp/ghav-ios-export-manifest | awk '{print $1}')"
