@@ -30,9 +30,7 @@ name: PR Visual Recap (fork, trusted + label-gated)
 #   - Concurrency: per-PR, cancel-in-progress (mirror of main workflow).
 
 on:
-  pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review, labeled]
-
+  workflow_dispatch:
 permissions:
   contents: read
 

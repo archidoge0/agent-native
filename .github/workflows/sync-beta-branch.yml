@@ -4,10 +4,7 @@ name: Sync framework beta branch
 # main here keeps beta current for every merged app change, not only package
 # changes handled by beta-publish.yml.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
-
 permissions:
   contents: write
 

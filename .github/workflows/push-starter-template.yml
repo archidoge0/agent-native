@@ -11,18 +11,7 @@ name: Push chat template to starter
 # source version) and its publish finishing, HEAD's pin isn't installable yet, so
 # the gate skips — and the publish dispatch re-runs the mirror the moment it lands.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "templates/chat/**"
-      - ".github/workflows/push-starter-template.yml"
-  # Fires when a publish completes (published == true). This is the reliable
-  # second chance for anything the gate skipped during a publish-in-flight
-  # window: by the time it fires, the just-published version is on npm.
-  repository_dispatch:
-    types: [agent-native-packages-published]
   workflow_dispatch:
-
 permissions:
   contents: read
 

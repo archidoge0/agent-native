@@ -4,10 +4,7 @@ name: Monitor Agent-Native site availability
 # an edge outage can make both the app health endpoint and the dashboard
 # unavailable while the deploy metadata still says "ready".
 on:
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch:
-
 permissions:
   actions: read
   contents: read

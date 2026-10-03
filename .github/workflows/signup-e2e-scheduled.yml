@@ -1,19 +1,7 @@
 name: Signup E2E (scheduled)
 
 on:
-  schedule:
-    - cron: "15 16 * * *"
   workflow_dispatch:
-    inputs:
-      apps:
-        description: "Comma-separated apps or all"
-        required: false
-        default: "all"
-      environments:
-        description: "Comma-separated environments: beta,production"
-        required: false
-        default: "beta"
-
 concurrency:
   group: signup-e2e-scheduled
   cancel-in-progress: false

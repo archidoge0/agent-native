@@ -1,10 +1,7 @@
 name: Chat template E2E
 
 on:
-  pull_request:
-    branches: [main]
   workflow_dispatch:
-
 concurrency:
   group: chat-template-e2e-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true

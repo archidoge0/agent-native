@@ -11,42 +11,6 @@ name: Promote Netlify deploy
 
 on:
   workflow_dispatch:
-    inputs:
-      site:
-        description: Site to prioritize, or all production sites
-        required: true
-        type: choice
-        default: all
-        options:
-          - all
-          - assets
-          - brain
-          - design
-          - clips
-          - crm
-          - starter
-          - slides
-          - mail
-          - macros
-          - forms
-          - plan
-          - dispatch
-          - content
-          - calendar
-          - analytics
-          - factory
-          - fw
-      clear_others:
-        description: Cancel other sites' queued (not in-progress) production deploys to free build slots
-        required: false
-        type: boolean
-        default: true
-      rebuild:
-        description: Trigger a fresh production build of the target site
-        required: false
-        type: boolean
-        default: true
-
 permissions:
   contents: read
 

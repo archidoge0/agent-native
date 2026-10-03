@@ -5,10 +5,7 @@ name: Deploy Agent-Native beta sites from GitHub
 # Git-connected auto-builds are disabled to prevent stale queued builds from
 # overwriting a newer result.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
-
 permissions:
   contents: read
 

@@ -5,7 +5,6 @@ name: Deploy Agent-Native beta sites
 # Netlify site-level Git builds remain a separate cutover switch.
 on:
   workflow_dispatch:
-
 permissions:
   contents: read
 

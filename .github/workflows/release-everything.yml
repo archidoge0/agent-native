@@ -4,21 +4,7 @@ name: 🚀 Release everything
 # first, then releases both desktop apps and promotes every configured
 # *.agent-native.com site from that exact post-release commit.
 on:
-  schedule:
-    - cron: "0 12 * * 1-4"
-      timezone: "America/Los_Angeles"
   workflow_dispatch:
-    inputs:
-      releaseType:
-        description: Stable npm release bump
-        required: true
-        type: choice
-        options:
-          - patch
-          - minor
-          - major
-        default: patch
-
 permissions:
   actions: write
   contents: write

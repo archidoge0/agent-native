@@ -12,9 +12,7 @@ name: Cancel superseded Netlify main deploys
 # cancel-stale-netlify-previews.yml.
 
 on:
-  push:
-    branches: [main]
-
+  workflow_dispatch:
 permissions:
   contents: read
 

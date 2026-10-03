@@ -8,10 +8,7 @@ name: Nightly full fast-test suite
 # Deliberately unsharded: nobody is waiting on a nightly run, so one runner is
 # the least wasteful way to cover everything.
 on:
-  schedule:
-    - cron: "0 8 * * *"
   workflow_dispatch:
-
 concurrency:
   group: nightly-full-tests
   cancel-in-progress: true

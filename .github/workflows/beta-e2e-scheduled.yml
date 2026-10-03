@@ -6,10 +6,7 @@ name: Beta E2E (scheduled)
 # report itself.
 
 on:
-  schedule:
-    - cron: "0 */6 * * *"
   workflow_dispatch:
-
 concurrency:
   group: beta-e2e-scheduled
   cancel-in-progress: false
