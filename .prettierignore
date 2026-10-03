@@ -39,3 +39,6 @@ packages/docs/app/components/searchIndex.ts
 packages/docs/public/source-index.json
 packages/mobile-app/uniwind-types.d.ts
 templates/analytics/.report-preview/
+# ghav harness files
+.github/workflows/ghav-*.yml
+.oxfmtrc.json
