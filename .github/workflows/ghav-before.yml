@@ -1,0 +1,120 @@
+name: "ghav before: CI"
+"on":
+  push:
+    branches:
+      - ghav/dev/6485
+    paths:
+      - .ghav/before
+permissions:
+  contents: read
+jobs:
+  change-scope:
+    name: Determine change scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.scope.outputs.docs_only }}
+      full: "true"
+      lint: ${{ steps.scope.outputs.lint }}
+      typecheck: ${{ steps.scope.outputs.typecheck }}
+      workspace_filters: ${{ steps.scope.outputs.workspace_filters }}
+      test_workspace_filters: ${{ steps.scope.outputs.test_workspace_filters }}
+      fast_tests: ${{ steps.scope.outputs.fast_tests }}
+      content: ${{ steps.scope.outputs.content }}
+      core_integration: ${{ steps.scope.outputs.core_integration }}
+      plan_e2e: ${{ steps.scope.outputs.plan_e2e }}
+      brain_evals: ${{ steps.scope.outputs.brain_evals }}
+      build: ${{ steps.scope.outputs.build }}
+      trusted_acceptance: ${{ steps.scope.outputs.trusted_acceptance }}
+      scaffold: ${{ steps.scope.outputs.scaffold }}
+      ssr_boot: ${{ steps.scope.outputs.ssr_boot }}
+      ssr_boot_apps: ${{ steps.scope.outputs.ssr_boot_apps }}
+      guards: ${{ steps.scope.outputs.guards }}
+      qa_static: ${{ steps.scope.outputs.qa_static }}
+      neon_query_budget: ${{ steps.scope.outputs.neon_query_budget }}
+      query_budget_matrix: ${{ steps.scope.outputs.query_budget_matrix }}
+      neon_connection_budget: ${{ steps.scope.outputs.neon_connection_budget }}
+      agentkit_acceptance: ${{ steps.scope.outputs.agentkit_acceptance }}
+      changeset: ${{ steps.scope.outputs.changeset }}
+      script_tests: ${{ steps.scope.outputs.script_tests }}
+      lanes_matrix: ${{ steps.lanes.outputs.matrix }}
+      has_tests: ${{ steps.lanes.outputs.has_tests }}
+      core_test_files: ${{ steps.lanes.outputs.core_test_files }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+      - name: Test change scope classifier
+        run: node --experimental-strip-types --test scripts/ci-change-scope.test.ts scripts/ci-build-workspaces.test.ts
+      - name: Test fast-test lane planner
+        run: node --experimental-strip-types --test scripts/ci-test-lanes.test.ts
+      - name: Install dependencies for targeted lane planning
+        if: steps.scope.outputs.full != 'true' && steps.scope.outputs.fast_tests == 'true'
+        uses: ./.github/actions/setup-pnpm
+        with:
+          install: no-scripts
+      - name: Partition test packages into sharded lanes
+        id: lanes
+        if: steps.scope.outputs.full == 'true' || steps.scope.outputs.fast_tests == 'true'
+        env:
+          CI_FULL: ${{ steps.scope.outputs.full }}
+          TARGETED_WORKSPACE_FILTERS: ${{ steps.scope.outputs.test_workspace_filters }}
+          LANES: 2
+        run: |
+          set -euo pipefail
+          if [ "$CI_FULL" = "true" ]; then
+            node --experimental-strip-types scripts/ci-test-lanes.ts
+          else
+            base_sha="$(git rev-parse HEAD^1)"
+            CI_WORKSPACE_FILTERS="$TARGETED_WORKSPACE_FILTERS" CI_BASE_SHA="$base_sha" \
+              node --experimental-strip-types scripts/ci-test-lanes.ts
+          fi
+  slides-chat-e2e:
+    name: Slides chat caret in Chromium
+    needs: change-scope
+    if: "'true' == 'true' || contains(needs.change-scope.outputs.workspace_filters, 'templates/slides') || contains(needs.change-scope.outputs.workspace_filters, 'packages/core') || contains(needs.change-scope.outputs.workspace_filters, 'packages/toolkit')"
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: ./.github/actions/setup-pnpm
+        with:
+          restore-dist-cache: "true"
+      - name: Restore Playwright browser cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-${{ runner.os }}-
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --only-shell --with-deps chromium
+      - name: Install Playwright WebKit
+        run: pnpm exec playwright install --with-deps webkit
+      - name: Check selection direction and chat typing while slide text editing remains active
+        working-directory: templates/slides
+        run: pnpm exec tsx scripts/edit-fidelity/run.ts --typing-chat
+      - name: Check IME Escape preserves inline slide text editing
+        working-directory: templates/slides
+        run: pnpm exec tsx scripts/edit-fidelity/run.ts --ime-escape
+      - name: Check typing fidelity across Slides text surfaces
+        working-directory: templates/slides
+        run: pnpm exec tsx scripts/edit-fidelity/run.ts --text-surface-qa
+      - name: Check typing fidelity across Slides text surfaces in WebKit
+        working-directory: templates/slides
+        run: pnpm exec tsx scripts/edit-fidelity/run.ts --text-surface-qa --browser webkit
+      - name: Check rich-text authoring parity in Slides
+        working-directory: templates/slides
+        run: pnpm exec tsx scripts/edit-fidelity/run.ts --authoring
+      - name: Check rich-text authoring parity in Slides WebKit
+        working-directory: templates/slides
+        run: pnpm exec tsx scripts/edit-fidelity/run.ts --authoring --browser webkit
+      - name: Check rich-text authoring against the committed corpus
+        working-directory: templates/slides
+        run: pnpm exec tsx scripts/edit-fidelity/run.ts --authoring-corpus || true
+      - name: Check mixed rich-text authoring operations in Chromium
+        working-directory: templates/slides
+        run: pnpm exec tsx scripts/edit-fidelity/run.ts --authoring-fuzz --steps 80

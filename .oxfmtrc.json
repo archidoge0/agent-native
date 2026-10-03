@@ -4,5 +4,9 @@
   "printWidth": 80,
   "trailingComma": "all",
   "proseWrap": "preserve",
-  "sortImports": true
+  "sortImports": true,
+  "ignorePatterns": [
+    ".github/workflows/ghav-*.yml",
+    ".oxfmtrc.json"
+  ]
 }
