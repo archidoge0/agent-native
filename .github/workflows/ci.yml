@@ -1,16 +1,11 @@
 name: CI
-
-on:
-  pull_request:
-    branches: [main]
-
+'on':
+  workflow_dispatch: {}
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
-
 permissions:
   contents: read
-
 jobs:
   change-scope:
     name: Determine change scope
@@ -45,53 +40,44 @@ jobs:
       has_tests: ${{ steps.lanes.outputs.has_tests }}
       core_test_files: ${{ steps.lanes.outputs.core_test_files }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          fetch-depth: 0
-          filter: blob:none
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: "22"
-
-      - name: Test change scope classifier
-        run: node --experimental-strip-types --test scripts/ci-change-scope.test.ts scripts/ci-build-workspaces.test.ts
-
-      - name: Test fast-test lane planner
-        run: node --experimental-strip-types --test scripts/ci-test-lanes.test.ts
-
-      - name: Classify changed paths
-        id: scope
-        env:
-          CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: node --experimental-strip-types scripts/ci-change-scope.ts
-
-      # Full planning only reads manifests and counts files. Targeted planning
-      # runs `pnpm list` and `vitest list --changed`, so it needs an install.
-      - name: Install dependencies for targeted lane planning
-        if: steps.scope.outputs.full != 'true' && steps.scope.outputs.fast_tests == 'true'
-        uses: ./.github/actions/setup-pnpm
-        with:
-          install: no-scripts
-
-      - name: Partition test packages into sharded lanes
-        id: lanes
-        if: steps.scope.outputs.full == 'true' || steps.scope.outputs.fast_tests == 'true'
-        env:
-          CI_FULL: ${{ steps.scope.outputs.full }}
-          TARGETED_WORKSPACE_FILTERS: ${{ steps.scope.outputs.test_workspace_filters }}
-          LANES: 2
-        run: |
-          set -euo pipefail
-          if [ "$CI_FULL" = "true" ]; then
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      with:
+        fetch-depth: 0
+        filter: blob:none
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      with:
+        node-version: '22'
+    - name: Test change scope classifier
+      run: node --experimental-strip-types --test scripts/ci-change-scope.test.ts scripts/ci-build-workspaces.test.ts
+    - name: Test fast-test lane planner
+      run: node --experimental-strip-types --test scripts/ci-test-lanes.test.ts
+    - name: Classify changed paths
+      id: scope
+      env:
+        CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        CI_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: node --experimental-strip-types scripts/ci-change-scope.ts
+    - name: Install dependencies for targeted lane planning
+      if: steps.scope.outputs.full != 'true' && steps.scope.outputs.fast_tests == 'true'
+      uses: ./.github/actions/setup-pnpm
+      with:
+        install: no-scripts
+    - name: Partition test packages into sharded lanes
+      id: lanes
+      if: steps.scope.outputs.full == 'true' || steps.scope.outputs.fast_tests == 'true'
+      env:
+        CI_FULL: ${{ steps.scope.outputs.full }}
+        TARGETED_WORKSPACE_FILTERS: ${{ steps.scope.outputs.test_workspace_filters }}
+        LANES: 2
+      run: |
+        set -euo pipefail
+        if [ "$CI_FULL" = "true" ]; then
+          node --experimental-strip-types scripts/ci-test-lanes.ts
+        else
+          base_sha="$(git rev-parse HEAD^1)"
+          CI_WORKSPACE_FILTERS="$TARGETED_WORKSPACE_FILTERS" CI_BASE_SHA="$base_sha" \
             node --experimental-strip-types scripts/ci-test-lanes.ts
-          else
-            base_sha="$(git rev-parse HEAD^1)"
-            CI_WORKSPACE_FILTERS="$TARGETED_WORKSPACE_FILTERS" CI_BASE_SHA="$base_sha" \
-              node --experimental-strip-types scripts/ci-test-lanes.ts
-          fi
-
+        fi
   lint:
     name: Lint & format
     needs: change-scope
@@ -99,65 +85,57 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          fetch-depth: 0
-          filter: blob:none
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      with:
+        fetch-depth: 0
+        filter: blob:none
+    - uses: ./.github/actions/setup-pnpm
+      with:
+        install: no-scripts
+    - name: Check the full tree
+      if: needs.change-scope.outputs.full == 'true'
+      run: pnpm fmt:check && pnpm oxlint --quiet
+    - name: Check changed source files
+      if: needs.change-scope.outputs.full != 'true'
+      env:
+        CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        CI_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: |
+        set -euo pipefail
 
-      - uses: ./.github/actions/setup-pnpm
-        with:
-          install: no-scripts
+        format_files=()
+        lint_files=()
+        while IFS= read -r -d '' file; do
+          [ -f "$file" ] || continue
+          case "$file" in
+            # oxfmt formats Markdown too, and `fmt:check` covers the whole
+            # tree. Leaving .md/.mdx out here let unformatted docs land on
+            # main and turn this job red on every unrelated PR afterwards.
+            *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.mts|*.cts|*.json|*.jsonc|*.css|*.md|*.mdx)
+              format_files+=("$file")
+              ;;
+          esac
+          case "$file" in
+            *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.mts|*.cts)
+              lint_files+=("$file")
+              ;;
+          esac
+        done < <(git diff --name-only -z "$CI_BASE_SHA...$CI_HEAD_SHA")
 
-      - name: Check the full tree
-        if: needs.change-scope.outputs.full == 'true'
-        # The tree carries ~15k pre-existing warnings; printing them buries
-        # the errors that actually fail this step.
-        run: pnpm fmt:check && pnpm oxlint --quiet
-
-      - name: Check changed source files
-        if: needs.change-scope.outputs.full != 'true'
-        env:
-          CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-
-          format_files=()
-          lint_files=()
-          while IFS= read -r -d '' file; do
-            [ -f "$file" ] || continue
-            case "$file" in
-              # oxfmt formats Markdown too, and `fmt:check` covers the whole
-              # tree. Leaving .md/.mdx out here let unformatted docs land on
-              # main and turn this job red on every unrelated PR afterwards.
-              *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.mts|*.cts|*.json|*.jsonc|*.css|*.md|*.mdx)
-                format_files+=("$file")
-                ;;
-            esac
-            case "$file" in
-              *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.mts|*.cts)
-                lint_files+=("$file")
-                ;;
-            esac
-          done < <(git diff --name-only -z "$CI_BASE_SHA...$CI_HEAD_SHA")
-
-          if ((${#format_files[@]} > 0)); then
-            pnpm exec oxfmt --check "${format_files[@]}"
-          fi
-          if ((${#lint_files[@]} > 0)); then
-            pnpm exec oxlint --config .oxlintrc.json --no-error-on-unmatched-pattern "${lint_files[@]}"
-          fi
-
-      - name: Require changeset for publishable package changes
-        if: ${{ !cancelled() && needs.change-scope.outputs.changeset == 'true' && github.event.pull_request.head.ref != 'changeset-release/main' }}
-        env:
-          GITHUB_BASE_REF: ${{ github.base_ref }}
-        run: node scripts/check-changeset.mjs
-
-      - name: Enforce package bump policy
-        if: ${{ !cancelled() && needs.change-scope.outputs.changeset == 'true' && github.event.pull_request.head.ref != 'changeset-release/main' }}
-        run: node scripts/guard-no-major-changeset.mjs
-
+        if ((${#format_files[@]} > 0)); then
+          pnpm exec oxfmt --check "${format_files[@]}"
+        fi
+        if ((${#lint_files[@]} > 0)); then
+          pnpm exec oxlint --config .oxlintrc.json --no-error-on-unmatched-pattern "${lint_files[@]}"
+        fi
+    - name: Require changeset for publishable package changes
+      if: ${{ !cancelled() && needs.change-scope.outputs.changeset == 'true' && github.event.pull_request.head.ref != 'changeset-release/main' }}
+      env:
+        GITHUB_BASE_REF: ${{ github.base_ref }}
+      run: node scripts/check-changeset.mjs
+    - name: Enforce package bump policy
+      if: ${{ !cancelled() && needs.change-scope.outputs.changeset == 'true' && github.event.pull_request.head.ref != 'changeset-release/main' }}
+      run: node scripts/guard-no-major-changeset.mjs
   typecheck:
     name: Typecheck
     needs: change-scope
@@ -165,27 +143,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - uses: ./.github/actions/setup-pnpm
-        with:
-          restore-dist-cache: "true"
-
-      - name: Typecheck affected workspaces
-        env:
-          CI_FULL: ${{ needs.change-scope.outputs.full }}
-          CI_WORKSPACE_FILTERS: ${{ needs.change-scope.outputs.test_workspace_filters }}
-        run: |
-          if [ "$CI_FULL" = "true" ]; then
-            pnpm typecheck
-          else
-            filters=()
-            while IFS= read -r filter; do
-              filters+=(--filter "$filter")
-            done < <(node -e 'for (const filter of JSON.parse(process.env.CI_WORKSPACE_FILTERS)) console.log(filter)')
-            pnpm -r --no-bail --if-present "${filters[@]}" run typecheck
-          fi
-
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+    - uses: ./.github/actions/setup-pnpm
+      with:
+        restore-dist-cache: 'true'
+    - name: Typecheck affected workspaces
+      env:
+        CI_FULL: ${{ needs.change-scope.outputs.full }}
+        CI_WORKSPACE_FILTERS: ${{ needs.change-scope.outputs.test_workspace_filters }}
+      run: |
+        if [ "$CI_FULL" = "true" ]; then
+          pnpm typecheck
+        else
+          filters=()
+          while IFS= read -r filter; do
+            filters+=(--filter "$filter")
+          done < <(node -e 'for (const filter of JSON.parse(process.env.CI_WORKSPACE_FILTERS)) console.log(filter)')
+          pnpm -r --no-bail --if-present "${filters[@]}" run typecheck
+        fi
   test-rest:
     name: Fast tests ${{ matrix.lane }}
     needs: change-scope
@@ -193,63 +168,31 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      # One worker per core. The shared config's 25% default is for laptops.
-      VITEST_CONCURRENCY: "100%"
+      VITEST_CONCURRENCY: 100%
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.change-scope.outputs.lanes_matrix) }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - uses: ./.github/actions/setup-pnpm
-        with:
-          restore-dist-cache: "true"
-
-      - name: Restore Playwright browser cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: playwright-${{ runner.os }}-
-
-      - name: Install Playwright Chromium for browser-backed unit tests
-        run: |
-          pnpm exec playwright install --only-shell --force chromium
-          pnpm --filter @agent-native/creative-context exec playwright install --only-shell --force chromium
-
-      - name: Run core fast-test shard
-        if: matrix.coreShard != ''
-        run: >-
-          pnpm --filter @agent-native/core exec vitest run --dir src
-          --shard=${{ matrix.coreShard }}
-          --exclude "**/*.db.test.ts"
-          --exclude "**/*.integration.spec.ts"
-          --exclude "**/*.integration.test.ts"
-          --exclude "**/*.e2e.spec.ts"
-          --exclude "**/*.e2e.test.ts"
-          --exclude "**/e2e/**"
-          --exclude "**/*.live.spec.ts"
-          --exclude "**/*.live.test.ts"
-          --exclude "**/*.perf.spec.ts"
-          --exclude "**/*.perf.test.ts"
-          --exclude "**/create-e2e.spec.ts"
-
-      - name: Run package fast tests for lane
-        if: matrix.filters != ''
-        run: >-
-          pnpm -r --no-bail --workspace-concurrency=1 ${{ matrix.filters }} run test
-          --exclude "**/*.db.test.ts"
-          --exclude "**/*.integration.spec.ts"
-          --exclude "**/*.integration.test.ts"
-          --exclude "**/*.e2e.spec.ts"
-          --exclude "**/*.e2e.test.ts"
-          --exclude "**/e2e/**"
-          --exclude "**/*.live.spec.ts"
-          --exclude "**/*.live.test.ts"
-          --exclude "**/*.perf.spec.ts"
-          --exclude "**/*.perf.test.ts"
-          --exclude "**/create-e2e.spec.ts"
-
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+    - uses: ./.github/actions/setup-pnpm
+      with:
+        restore-dist-cache: 'true'
+    - name: Restore Playwright browser cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: playwright-${{ runner.os }}-
+    - name: Install Playwright Chromium for browser-backed unit tests
+      run: |
+        pnpm exec playwright install --only-shell --force chromium
+        pnpm --filter @agent-native/creative-context exec playwright install --only-shell --force chromium
+    - name: Run core fast-test shard
+      if: matrix.coreShard != ''
+      run: pnpm --filter @agent-native/core exec vitest run --dir src --shard=${{ matrix.coreShard }} --exclude "**/*.db.test.ts" --exclude "**/*.integration.spec.ts" --exclude "**/*.integration.test.ts" --exclude "**/*.e2e.spec.ts" --exclude "**/*.e2e.test.ts" --exclude "**/e2e/**" --exclude "**/*.live.spec.ts" --exclude "**/*.live.test.ts" --exclude "**/*.perf.spec.ts" --exclude "**/*.perf.test.ts" --exclude "**/create-e2e.spec.ts"
+    - name: Run package fast tests for lane
+      if: matrix.filters != ''
+      run: pnpm -r --no-bail --workspace-concurrency=1 ${{ matrix.filters }} run test --exclude "**/*.db.test.ts" --exclude "**/*.integration.spec.ts" --exclude "**/*.integration.test.ts" --exclude "**/*.e2e.spec.ts" --exclude "**/*.e2e.test.ts" --exclude "**/e2e/**" --exclude "**/*.live.spec.ts" --exclude "**/*.live.test.ts" --exclude "**/*.perf.spec.ts" --exclude "**/*.perf.test.ts" --exclude "**/create-e2e.spec.ts"
   test-targeted:
     name: Fast tests targeted ${{ matrix.lane }}
     needs: change-scope
@@ -257,71 +200,48 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      # One worker per core. The shared config's 25% default is for laptops.
-      VITEST_CONCURRENCY: "100%"
+      VITEST_CONCURRENCY: 100%
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.change-scope.outputs.lanes_matrix) }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - uses: ./.github/actions/setup-pnpm
-        with:
-          restore-dist-cache: "true"
-
-      - name: Restore Playwright browser cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: playwright-${{ runner.os }}-
-
-      - name: Install Playwright Chromium for browser-backed unit tests
-        run: |
-          pnpm exec playwright install --only-shell --force chromium
-          pnpm --filter @agent-native/creative-context exec playwright install --only-shell --force chromium
-
-      - name: Run core fast-test shard
-        if: matrix.coreShard != ''
-        env:
-          CORE_SHARD: ${{ matrix.coreShard }}
-          CORE_TEST_MODE: ${{ matrix.coreMode }}
-          CORE_TEST_FILES: ${{ needs.change-scope.outputs.core_test_files }}
-        run: |
-          set -euo pipefail
-          args=(run --dir src --shard="$CORE_SHARD" --passWithNoTests)
-          if [ "$CORE_TEST_MODE" = changed ]; then
-            core_test_files=()
-            while IFS= read -r -d '' file; do
-              core_test_files+=("$file")
-            done < <(
-              node -e 'for (const file of JSON.parse(process.env.CORE_TEST_FILES)) process.stdout.write(`${file}\0`)'
-            )
-            if ((${#core_test_files[@]} == 0)); then
-              echo "::error::Planner emitted a changed Core shard with no test files"
-              exit 1
-            fi
-            args+=("${core_test_files[@]}")
-          fi
-          args+=(
-            --exclude "**/*.db.test.ts"
-            --exclude "**/*.integration.spec.ts"
-            --exclude "**/*.integration.test.ts"
-            --exclude "**/*.e2e.spec.ts"
-            --exclude "**/*.e2e.test.ts"
-            --exclude "**/e2e/**"
-            --exclude "**/*.live.spec.ts"
-            --exclude "**/*.live.test.ts"
-            --exclude "**/*.perf.spec.ts"
-            --exclude "**/*.perf.test.ts"
-            --exclude "**/create-e2e.spec.ts"
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+    - uses: ./.github/actions/setup-pnpm
+      with:
+        restore-dist-cache: 'true'
+    - name: Restore Playwright browser cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: playwright-${{ runner.os }}-
+    - name: Install Playwright Chromium for browser-backed unit tests
+      run: |
+        pnpm exec playwright install --only-shell --force chromium
+        pnpm --filter @agent-native/creative-context exec playwright install --only-shell --force chromium
+    - name: Run core fast-test shard
+      if: matrix.coreShard != ''
+      env:
+        CORE_SHARD: ${{ matrix.coreShard }}
+        CORE_TEST_MODE: ${{ matrix.coreMode }}
+        CORE_TEST_FILES: ${{ needs.change-scope.outputs.core_test_files }}
+      run: |
+        set -euo pipefail
+        args=(run --dir src --shard="$CORE_SHARD" --passWithNoTests)
+        if [ "$CORE_TEST_MODE" = changed ]; then
+          core_test_files=()
+          while IFS= read -r -d '' file; do
+            core_test_files+=("$file")
+          done < <(
+            node -e 'for (const file of JSON.parse(process.env.CORE_TEST_FILES)) process.stdout.write(`${file}\0`)'
           )
-          pnpm --filter @agent-native/core exec vitest "${args[@]}"
-
-      - name: Run package fast tests for lane
-        if: matrix.filters != ''
-        run: >-
-          pnpm -r --no-bail --if-present --workspace-concurrency=1 ${{ matrix.filters }} run test
+          if ((${#core_test_files[@]} == 0)); then
+            echo "::error::Planner emitted a changed Core shard with no test files"
+            exit 1
+          fi
+          args+=("${core_test_files[@]}")
+        fi
+        args+=(
           --exclude "**/*.db.test.ts"
           --exclude "**/*.integration.spec.ts"
           --exclude "**/*.integration.test.ts"
@@ -333,74 +253,81 @@ jobs:
           --exclude "**/*.perf.spec.ts"
           --exclude "**/*.perf.test.ts"
           --exclude "**/create-e2e.spec.ts"
-
+        )
+        pnpm --filter @agent-native/core exec vitest "${args[@]}"
+    - name: Run package fast tests for lane
+      if: matrix.filters != ''
+      run: pnpm -r --no-bail --if-present --workspace-concurrency=1 ${{ matrix.filters }} run test --exclude "**/*.db.test.ts" --exclude "**/*.integration.spec.ts" --exclude "**/*.integration.test.ts" --exclude "**/*.e2e.spec.ts" --exclude "**/*.e2e.test.ts" --exclude "**/e2e/**" --exclude "**/*.live.spec.ts" --exclude "**/*.live.test.ts" --exclude "**/*.perf.spec.ts" --exclude "**/*.perf.test.ts" --exclude "**/create-e2e.spec.ts"
   fast-tests:
     name: Fast tests
-    needs: [change-scope, docs, test-rest, test-targeted]
+    needs:
+    - change-scope
+    - docs
+    - test-rest
+    - test-targeted
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Gate on lane results
-        env:
-          CHANGE_SCOPE_RESULT: ${{ needs.change-scope.result }}
-          DOCS_ONLY: ${{ needs.change-scope.outputs.docs_only }}
-          CI_FULL: ${{ needs.change-scope.outputs.full }}
-          FAST_TESTS: ${{ needs.change-scope.outputs.fast_tests }}
-          HAS_TESTS: ${{ needs.change-scope.outputs.has_tests }}
-          DOCS_RESULT: ${{ needs.docs.result }}
-          TEST_REST_RESULT: ${{ needs.test-rest.result }}
-          TEST_TARGETED_RESULT: ${{ needs.test-targeted.result }}
-        run: |
-          if [ "$CHANGE_SCOPE_RESULT" != "success" ]; then
-            echo "::error::change-scope did not succeed ($CHANGE_SCOPE_RESULT)"
+    - name: Gate on lane results
+      env:
+        CHANGE_SCOPE_RESULT: ${{ needs.change-scope.result }}
+        DOCS_ONLY: ${{ needs.change-scope.outputs.docs_only }}
+        CI_FULL: ${{ needs.change-scope.outputs.full }}
+        FAST_TESTS: ${{ needs.change-scope.outputs.fast_tests }}
+        HAS_TESTS: ${{ needs.change-scope.outputs.has_tests }}
+        DOCS_RESULT: ${{ needs.docs.result }}
+        TEST_REST_RESULT: ${{ needs.test-rest.result }}
+        TEST_TARGETED_RESULT: ${{ needs.test-targeted.result }}
+      run: |
+        if [ "$CHANGE_SCOPE_RESULT" != "success" ]; then
+          echo "::error::change-scope did not succeed ($CHANGE_SCOPE_RESULT)"
+          exit 1
+        fi
+        if [ "$DOCS_ONLY" = "true" ]; then
+          if [ "$DOCS_RESULT" != "success" ]; then
+            echo "::error::docs checks did not succeed ($DOCS_RESULT)"
             exit 1
           fi
-          if [ "$DOCS_ONLY" = "true" ]; then
-            if [ "$DOCS_RESULT" != "success" ]; then
-              echo "::error::docs checks did not succeed ($DOCS_RESULT)"
+          echo "Docs-only change: full fast-test lanes are not required."
+          exit 0
+        fi
+        if [ "$CI_FULL" = "true" ]; then
+          if [ "$HAS_TESTS" != "true" ] || [ "$TEST_REST_RESULT" != "success" ]; then
+            echo "::error::full fast-test lanes did not succeed (has_tests=$HAS_TESTS, test-rest=$TEST_REST_RESULT)"
+            exit 1
+          fi
+          echo "Full fast-test suite passed across all sharded lanes."
+          exit 0
+        fi
+        if [ "$FAST_TESTS" != "true" ]; then
+          if [ "$TEST_TARGETED_RESULT" != "skipped" ]; then
+            echo "::error::targeted test job ran without a fast-test selection ($TEST_TARGETED_RESULT)"
+            exit 1
+          fi
+          echo "No workspace fast tests are selected for this change set."
+          exit 0
+        fi
+        case "$HAS_TESTS" in
+          true)
+            if [ "$TEST_TARGETED_RESULT" != "success" ]; then
+              echo "::error::test-targeted did not succeed ($TEST_TARGETED_RESULT)"
               exit 1
             fi
-            echo "Docs-only change: full fast-test lanes are not required."
-            exit 0
-          fi
-          if [ "$CI_FULL" = "true" ]; then
-            if [ "$HAS_TESTS" != "true" ] || [ "$TEST_REST_RESULT" != "success" ]; then
-              echo "::error::full fast-test lanes did not succeed (has_tests=$HAS_TESTS, test-rest=$TEST_REST_RESULT)"
+            echo "Targeted workspace fast tests passed."
+            ;;
+          false)
+            if [ "$TEST_TARGETED_RESULT" != "skipped" ] && [ "$TEST_TARGETED_RESULT" != "success" ]; then
+              echo "::error::targeted test job did not skip cleanly ($TEST_TARGETED_RESULT)"
               exit 1
             fi
-            echo "Full fast-test suite passed across all sharded lanes."
-            exit 0
-          fi
-          if [ "$FAST_TESTS" != "true" ]; then
-            if [ "$TEST_TARGETED_RESULT" != "skipped" ]; then
-              echo "::error::targeted test job ran without a fast-test selection ($TEST_TARGETED_RESULT)"
-              exit 1
-            fi
-            echo "No workspace fast tests are selected for this change set."
-            exit 0
-          fi
-          case "$HAS_TESTS" in
-            true)
-              if [ "$TEST_TARGETED_RESULT" != "success" ]; then
-                echo "::error::test-targeted did not succeed ($TEST_TARGETED_RESULT)"
-                exit 1
-              fi
-              echo "Targeted workspace fast tests passed."
-              ;;
-            false)
-              if [ "$TEST_TARGETED_RESULT" != "skipped" ] && [ "$TEST_TARGETED_RESULT" != "success" ]; then
-                echo "::error::targeted test job did not skip cleanly ($TEST_TARGETED_RESULT)"
-                exit 1
-              fi
-              echo "No affected workspace has a test script; targeted fast tests were skipped."
-              ;;
-            *)
-              echo "::error::targeted lanes were not planned (has_tests='$HAS_TESTS')"
-              exit 1
-              ;;
-          esac
-
+            echo "No affected workspace has a test script; targeted fast tests were skipped."
+            ;;
+          *)
+            echo "::error::targeted lanes were not planned (has_tests='$HAS_TESTS')"
+            exit 1
+            ;;
+        esac
   docs:
     name: Docs checks
     needs: change-scope
@@ -408,18 +335,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - uses: ./.github/actions/setup-pnpm
-        with:
-          restore-dist-cache: "true"
-
-      - name: Run docs package tests
-        run: pnpm --filter @agent-native/docs test
-
-      - name: Typecheck docs package
-        run: pnpm --filter @agent-native/docs typecheck
-
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+    - uses: ./.github/actions/setup-pnpm
+      with:
+        restore-dist-cache: 'true'
+    - name: Run docs package tests
+      run: pnpm --filter @agent-native/docs test
+    - name: Typecheck docs package
+      run: pnpm --filter @agent-native/docs typecheck
   content-parity:
     name: Content parity
     needs: change-scope
@@ -427,15 +350,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - uses: ./.github/actions/setup-pnpm
-        with:
-          restore-dist-cache: "true"
-
-      - name: Run deterministic Content parity checks
-        run: pnpm test:content-parity
-
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+    - uses: ./.github/actions/setup-pnpm
+      with:
+        restore-dist-cache: 'true'
+    - name: Run deterministic Content parity checks
+      run: pnpm test:content-parity
   content-db-tests:
     name: Content DB tests
     needs: change-scope
@@ -449,44 +369,31 @@ jobs:
           POSTGRES_DB: content_migration_test
           POSTGRES_HOST_AUTH_METHOD: trust
         ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d content_migration_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+        - 5432:5432
+        options: --health-cmd "pg_isready -U postgres -d content_migration_test" --health-interval 10s --health-timeout 5s --health-retries 5
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - uses: ./.github/actions/setup-pnpm
-        with:
-          restore-dist-cache: "true"
-
-      - name: Run Content DB tests
-        run: pnpm test:content-db
-
-      - name: Install isolated PGlite test driver
-        if: ${{ !cancelled() }}
-        run: >-
-          npm install --ignore-scripts --no-save
-          --prefix "$RUNNER_TEMP/s2573-pglite"
-          @electric-sql/pglite@0.5.8
-
-      - name: Run PGlite lock and migration action semantics tests
-        if: ${{ !cancelled() }}
-        run: node scripts/test-content-database-lock-pglite.mjs
-        env:
-          S2573_PGLITE_INSTALL_PREFIX: ${{ runner.temp }}/s2573-pglite
-
-      - name: Run Content PostgreSQL lock integration tests
-        if: ${{ !cancelled() }}
-        run: |
-          pnpm test:content-db-postgres
-          pnpm --filter content exec vitest --run actions/upsert-database-item-by-key.db.test.ts --config vitest.config.ts
-        env:
-          CONTENT_MIGRATION_POSTGRES_URL: postgres://postgres@127.0.0.1:5432/content_migration_test
-          CONTENT_ROW_MUTATION_POSTGRES_URL: postgres://postgres@127.0.0.1:5432/content_migration_test
-
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+    - uses: ./.github/actions/setup-pnpm
+      with:
+        restore-dist-cache: 'true'
+    - name: Run Content DB tests
+      run: pnpm test:content-db
+    - name: Install isolated PGlite test driver
+      if: ${{ !cancelled() }}
+      run: npm install --ignore-scripts --no-save --prefix "$RUNNER_TEMP/s2573-pglite" @electric-sql/pglite@0.5.8
+    - name: Run PGlite lock and migration action semantics tests
+      if: ${{ !cancelled() }}
+      run: node scripts/test-content-database-lock-pglite.mjs
+      env:
+        S2573_PGLITE_INSTALL_PREFIX: ${{ runner.temp }}/s2573-pglite
+    - name: Run Content PostgreSQL lock integration tests
+      if: ${{ !cancelled() }}
+      run: |
+        pnpm test:content-db-postgres
+        pnpm --filter content exec vitest --run actions/upsert-database-item-by-key.db.test.ts --config vitest.config.ts
+      env:
+        CONTENT_MIGRATION_POSTGRES_URL: postgres://postgres@127.0.0.1:5432/content_migration_test
+        CONTENT_ROW_MUTATION_POSTGRES_URL: postgres://postgres@127.0.0.1:5432/content_migration_test
   core-integration-tests:
     name: Core integration tests
     needs: change-scope
@@ -494,27 +401,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - uses: ./.github/actions/setup-pnpm
-        with:
-          restore-dist-cache: "true"
-
-      - name: Restore Playwright browser cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: playwright-${{ runner.os }}-
-
-      - name: Install Playwright Chromium for browser-backed integration tests
-        run: |
-          pnpm exec playwright install --only-shell --force chromium
-          pnpm --filter @agent-native/creative-context exec playwright install --only-shell --force chromium
-
-      - name: Run Core integration tests
-        run: pnpm test:core-integration
-
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+    - uses: ./.github/actions/setup-pnpm
+      with:
+        restore-dist-cache: 'true'
+    - name: Restore Playwright browser cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: playwright-${{ runner.os }}-
+    - name: Install Playwright Chromium for browser-backed integration tests
+      run: |
+        pnpm exec playwright install --only-shell --force chromium
+        pnpm --filter @agent-native/creative-context exec playwright install --only-shell --force chromium
+    - name: Run Core integration tests
+      run: pnpm test:core-integration
   plan-e2e-tests:
     name: Plan E2E tests
     needs: change-scope
@@ -522,54 +424,40 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - uses: ./.github/actions/setup-pnpm
-        with:
-          restore-dist-cache: "true"
-
-      - name: Run Plan action E2E tests
-        run: pnpm test:plan-e2e
-
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+    - uses: ./.github/actions/setup-pnpm
+      with:
+        restore-dist-cache: 'true'
+    - name: Run Plan action E2E tests
+      run: pnpm test:plan-e2e
   slides-chat-e2e:
     name: Slides chat caret in Chromium
     needs: change-scope
-    if: >-
-      needs.change-scope.outputs.full == 'true' ||
-      contains(needs.change-scope.outputs.workspace_filters, 'templates/slides') ||
-      contains(needs.change-scope.outputs.workspace_filters, 'packages/core') ||
-      contains(needs.change-scope.outputs.workspace_filters, 'packages/toolkit')
+    if: needs.change-scope.outputs.full == 'true' || contains(needs.change-scope.outputs.workspace_filters, 'templates/slides') || contains(needs.change-scope.outputs.workspace_filters, 'packages/core') || contains(needs.change-scope.outputs.workspace_filters, 'packages/toolkit')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - uses: ./.github/actions/setup-pnpm
-        with:
-          restore-dist-cache: "true"
-
-      - name: Restore Playwright browser cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: playwright-${{ runner.os }}-
-
-      - name: Install Playwright Chromium
-        run: pnpm exec playwright install --only-shell --with-deps chromium
-
-      - name: Check selection direction and chat typing while slide text editing remains active
-        working-directory: templates/slides
-        run: pnpm exec tsx scripts/edit-fidelity/run.ts --typing-chat
-
-      - name: Check IME Escape preserves inline slide text editing
-        working-directory: templates/slides
-        run: pnpm exec tsx scripts/edit-fidelity/run.ts --ime-escape
-
-      - name: Check typing fidelity across Slides text surfaces
-        working-directory: templates/slides
-        run: pnpm exec tsx scripts/edit-fidelity/run.ts --text-surface-qa
-
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+    - uses: ./.github/actions/setup-pnpm
+      with:
+        restore-dist-cache: 'true'
+    - name: Restore Playwright browser cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: playwright-${{ runner.os }}-
+    - name: Install Playwright Chromium
+      run: pnpm exec playwright install --only-shell --with-deps chromium
+    - name: Check selection direction and chat typing while slide text editing remains active
+      working-directory: templates/slides
+      run: pnpm exec tsx scripts/edit-fidelity/run.ts --typing-chat
+    - name: Check IME Escape preserves inline slide text editing
+      working-directory: templates/slides
+      run: pnpm exec tsx scripts/edit-fidelity/run.ts --ime-escape
+    - name: Check typing fidelity across Slides text surfaces
+      working-directory: templates/slides
+      run: pnpm exec tsx scripts/edit-fidelity/run.ts --text-surface-qa
   brain-evals:
     name: Brain evals
     needs: change-scope
@@ -577,19 +465,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - uses: ./.github/actions/setup-pnpm
-        with:
-          restore-dist-cache: "true"
-
-      - name: Run brain evals
-        run: pnpm test:brain-evals
-
-      - name: Block privacy leaks and false positives
-        if: ${{ !cancelled() }}
-        run: pnpm test:brain-privacy-evals
-
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+    - uses: ./.github/actions/setup-pnpm
+      with:
+        restore-dist-cache: 'true'
+    - name: Run brain evals
+      run: pnpm test:brain-evals
+    - name: Block privacy leaks and false positives
+      if: ${{ !cancelled() }}
+      run: pnpm test:brain-privacy-evals
   build:
     name: Build
     needs: change-scope
@@ -597,26 +481,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - uses: ./.github/actions/setup-pnpm
-        with:
-          restore-dist-cache: "true"
-
-      - name: Build all packages
-        if: needs.change-scope.outputs.full == 'true'
-        run: node --experimental-strip-types scripts/ci-build-workspaces.ts --full
-
-      - name: Build affected workspaces
-        if: needs.change-scope.outputs.build == 'true' && needs.change-scope.outputs.full != 'true'
-        env:
-          CI_WORKSPACE_FILTERS: ${{ needs.change-scope.outputs.workspace_filters }}
-        run: node --experimental-strip-types scripts/ci-build-workspaces.ts
-
-      - name: Build docs site
-        if: needs.change-scope.outputs.docs_only == 'true'
-        run: pnpm --filter @agent-native/docs build
-
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+    - uses: ./.github/actions/setup-pnpm
+      with:
+        restore-dist-cache: 'true'
+    - name: Build all packages
+      if: needs.change-scope.outputs.full == 'true'
+      run: node --experimental-strip-types scripts/ci-build-workspaces.ts --full
+    - name: Build affected workspaces
+      if: needs.change-scope.outputs.build == 'true' && needs.change-scope.outputs.full != 'true'
+      env:
+        CI_WORKSPACE_FILTERS: ${{ needs.change-scope.outputs.workspace_filters }}
+      run: node --experimental-strip-types scripts/ci-build-workspaces.ts
+    - name: Build docs site
+      if: needs.change-scope.outputs.docs_only == 'true'
+      run: pnpm --filter @agent-native/docs build
   neon-query-budget:
     name: Cold-request query budget
     needs: change-scope
@@ -624,50 +503,45 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      AGENT_NATIVE_RELEASE_MIGRATIONS: "1"
-      AUTH_DISABLED: "true"
+      AGENT_NATIVE_RELEASE_MIGRATIONS: '1'
+      AUTH_DISABLED: 'true'
       BETTER_AUTH_SECRET: neon-query-budget-test-secret
       DATABASE_URL: pglite:memory
-      NETLIFY: "true"
+      NETLIFY: 'true'
       NODE_ENV: production
-      RUN_BACKGROUND_JOBS: "0"
+      RUN_BACKGROUND_JOBS: '0'
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - uses: ./.github/actions/setup-pnpm
-        with:
-          restore-dist-cache: "true"
-
-      # change-scope owns the app list: every template when shared code
-      # changed, otherwise only the templates this change touched.
-      - name: Build and measure the affected first-party templates
-        env:
-          QUERY_BUDGET_APPS: ${{ needs.change-scope.outputs.query_budget_apps }}
-        run: |
-          set -euo pipefail
-          mapfile -t apps < <(jq -r '.[]' <<< "$QUERY_BUDGET_APPS")
-          if [ "${#apps[@]}" -eq 0 ]; then
-            echo "::error::change-scope selected the query budget but no templates to measure."
-            exit 1
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+    - uses: ./.github/actions/setup-pnpm
+      with:
+        restore-dist-cache: 'true'
+    - name: Build and measure the affected first-party templates
+      env:
+        QUERY_BUDGET_APPS: ${{ needs.change-scope.outputs.query_budget_apps }}
+      run: |
+        set -euo pipefail
+        mapfile -t apps < <(jq -r '.[]' <<< "$QUERY_BUDGET_APPS")
+        if [ "${#apps[@]}" -eq 0 ]; then
+          echo "::error::change-scope selected the query budget but no templates to measure."
+          exit 1
+        fi
+        echo "Measuring: ${apps[*]}"
+        for app in "${apps[@]}"; do
+          app_dir="templates/$app"
+          rm -rf "$app_dir/.netlify" "$app_dir/.output" "$app_dir/.vercel" "$app_dir/dist" "$app_dir/build"
+          release_migrations=""
+          if [[ -f "$app_dir/netlify.toml" ]]; then
+            release_migrations="$(python3 -c 'import pathlib, sys, tomllib; print(tomllib.loads(pathlib.Path(sys.argv[1]).read_text()).get("context", {}).get("production", {}).get("environment", {}).get("AGENT_NATIVE_RELEASE_MIGRATIONS", ""))' "$app_dir/netlify.toml")"
           fi
-          echo "Measuring: ${apps[*]}"
-          for app in "${apps[@]}"; do
-            app_dir="templates/$app"
-            rm -rf "$app_dir/.netlify" "$app_dir/.output" "$app_dir/.vercel" "$app_dir/dist" "$app_dir/build"
-            release_migrations=""
-            if [[ -f "$app_dir/netlify.toml" ]]; then
-              release_migrations="$(python3 -c 'import pathlib, sys, tomllib; print(tomllib.loads(pathlib.Path(sys.argv[1]).read_text()).get("context", {}).get("production", {}).get("environment", {}).get("AGENT_NATIVE_RELEASE_MIGRATIONS", ""))' "$app_dir/netlify.toml")"
-            fi
-            if [[ "$release_migrations" == "1" ]]; then
-              export AGENT_NATIVE_RELEASE_MIGRATIONS=1
-            else
-              unset AGENT_NATIVE_RELEASE_MIGRATIONS
-            fi
-            NITRO_PRESET=netlify pnpm --filter "$app" build
-            pnpm ops:neon-query-budget --app "$app" --mode check
-            rm -rf "$app_dir/.netlify" "$app_dir/.output" "$app_dir/.vercel" "$app_dir/dist" "$app_dir/build"
-          done
-
+          if [[ "$release_migrations" == "1" ]]; then
+            export AGENT_NATIVE_RELEASE_MIGRATIONS=1
+          else
+            unset AGENT_NATIVE_RELEASE_MIGRATIONS
+          fi
+          NITRO_PRESET=netlify pnpm --filter "$app" build
+          pnpm ops:neon-query-budget --app "$app" --mode check
+          rm -rf "$app_dir/.netlify" "$app_dir/.output" "$app_dir/.vercel" "$app_dir/dist" "$app_dir/build"
+        done
   neon-connection-budget:
     name: Serverless Postgres connection budget
     needs: change-scope
@@ -681,28 +555,20 @@ jobs:
           POSTGRES_PASSWORD: neon-budget
           POSTGRES_DB: neon_budget
         ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d neon_budget"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+        - 5432:5432
+        options: --health-cmd "pg_isready -U postgres -d neon_budget" --health-interval 10s --health-timeout 5s --health-retries 5
     env:
-      # guard:allow-secret-literal — local ephemeral CI Postgres service only.
       DATABASE_URL: postgresql://postgres:neon-budget@127.0.0.1:5432/neon_budget
-      NETLIFY: "true"
+      NETLIFY: 'true'
       NETLIFY_FUNCTION_NAME: neon-query-budget
       NODE_ENV: production
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - uses: ./.github/actions/setup-pnpm
-        with:
-          restore-dist-cache: "true"
-
-      - name: Measure one cold and five warm requests against local Postgres
-        run: pnpm ops:neon-connection-budget
-
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+    - uses: ./.github/actions/setup-pnpm
+      with:
+        restore-dist-cache: 'true'
+    - name: Measure one cold and five warm requests against local Postgres
+      run: pnpm ops:neon-connection-budget
   trusted-acceptance:
     name: Trusted acceptance substrate
     needs: change-scope
@@ -710,25 +576,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - uses: ./.github/actions/setup-pnpm
-
-      - name: Validate config, provenance, receipts, and workflow boundaries
-        run: pnpm test:trusted-acceptance
-
-      - name: Build the pilot as secretless Netlify artifacts
-        env:
-          AGENT_NATIVE_BUILD_SHA: ${{ github.sha }}
-          NITRO_PRESET: netlify
-        run: |
-          pnpm --filter calendar build
-          pnpm --filter content build
-          test -d templates/calendar/dist
-          test -f templates/calendar/.netlify/functions-internal/server/main.mjs
-          test -d templates/content/dist
-          test -f templates/content/.netlify/functions-internal/server/main.mjs
-
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+    - uses: ./.github/actions/setup-pnpm
+    - name: Validate config, provenance, receipts, and workflow boundaries
+      run: pnpm test:trusted-acceptance
+    - name: Build the pilot as secretless Netlify artifacts
+      env:
+        AGENT_NATIVE_BUILD_SHA: ${{ github.sha }}
+        NITRO_PRESET: netlify
+      run: |
+        pnpm --filter calendar build
+        pnpm --filter content build
+        test -d templates/calendar/dist
+        test -f templates/calendar/.netlify/functions-internal/server/main.mjs
+        test -d templates/content/dist
+        test -f templates/content/.netlify/functions-internal/server/main.mjs
   scaffold-e2e:
     name: Scaffold E2E — create + pnpm install
     needs: change-scope
@@ -736,91 +598,82 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - uses: ./.github/actions/free-disk
-
-      - uses: ./.github/actions/setup-pnpm
-        with:
-          restore-dist-cache: "true"
-
-      - name: Headless scaffold — pnpm install + typecheck + action
-        run: pnpm --filter @agent-native/core exec vitest run src/cli/create-e2e.spec.ts
-
-      - name: Headless onboarding — local core install + typecheck + action
-        env:
-          AGENT_NATIVE_CREATE_USE_LOCAL_CORE: "1"
-        run: >-
-          pnpm --filter @agent-native/core exec vitest run
-          src/cli/create-e2e.spec.ts
-          -t "pnpm install, pnpm typecheck, and pnpm action hello all succeed"
-
-      - name: Scaffold workspace (chat + calendar + dispatch) and verify pnpm install + build
-        env:
-          AGENT_NATIVE_CREATE_USE_LOCAL_CORE: "1"
-        run: |
-          cd "$(mktemp -d)"
-          node "$GITHUB_WORKSPACE/packages/core/dist/cli/index.js" create test-workspace --template chat,calendar,dispatch
-          cd test-workspace
-          # Required package must be scaffolded
-          if [ ! -d "packages/scheduling" ]; then
-            echo "::error::packages/scheduling not scaffolded for calendar template"
-            exit 1
-          fi
-          # Root must have postinstall for required packages
-          if ! grep -q 'postinstall' package.json; then
-            echo "::error::postinstall script missing for required packages"
-            exit 1
-          fi
-          # Every workspace:* dep in scaffolded apps must resolve to a
-          # package actually present in the workspace. Catches the class of
-          # bug Sami hit: a template depended on @agent-native/dispatch
-          # (a published package, not a workspace member) and `pnpm install`
-          # blew up with ERR_PNPM_WORKSPACE_PKG_NOT_FOUND.
-          node -e '
-            const fs = require("fs");
-            const path = require("path");
-            const wsMembers = new Set();
-            for (const dir of ["apps", "packages"]) {
-              if (!fs.existsSync(dir)) continue;
-              for (const sub of fs.readdirSync(dir)) {
-                const pj = path.join(dir, sub, "package.json");
-                if (fs.existsSync(pj)) {
-                  const n = JSON.parse(fs.readFileSync(pj, "utf8")).name;
-                  if (n) wsMembers.add(n);
-                }
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+    - uses: ./.github/actions/free-disk
+    - uses: ./.github/actions/setup-pnpm
+      with:
+        restore-dist-cache: 'true'
+    - name: Headless scaffold — pnpm install + typecheck + action
+      run: pnpm --filter @agent-native/core exec vitest run src/cli/create-e2e.spec.ts
+    - name: Headless onboarding — local core install + typecheck + action
+      env:
+        AGENT_NATIVE_CREATE_USE_LOCAL_CORE: '1'
+      run: pnpm --filter @agent-native/core exec vitest run src/cli/create-e2e.spec.ts -t "pnpm install, pnpm typecheck, and pnpm action hello all succeed"
+    - name: Scaffold workspace (chat + calendar + dispatch) and verify pnpm install + build
+      env:
+        AGENT_NATIVE_CREATE_USE_LOCAL_CORE: '1'
+      run: |
+        cd "$(mktemp -d)"
+        node "$GITHUB_WORKSPACE/packages/core/dist/cli/index.js" create test-workspace --template chat,calendar,dispatch
+        cd test-workspace
+        # Required package must be scaffolded
+        if [ ! -d "packages/scheduling" ]; then
+          echo "::error::packages/scheduling not scaffolded for calendar template"
+          exit 1
+        fi
+        # Root must have postinstall for required packages
+        if ! grep -q 'postinstall' package.json; then
+          echo "::error::postinstall script missing for required packages"
+          exit 1
+        fi
+        # Every workspace:* dep in scaffolded apps must resolve to a
+        # package actually present in the workspace. Catches the class of
+        # bug Sami hit: a template depended on @agent-native/dispatch
+        # (a published package, not a workspace member) and `pnpm install`
+        # blew up with ERR_PNPM_WORKSPACE_PKG_NOT_FOUND.
+        node -e '
+          const fs = require("fs");
+          const path = require("path");
+          const wsMembers = new Set();
+          for (const dir of ["apps", "packages"]) {
+            if (!fs.existsSync(dir)) continue;
+            for (const sub of fs.readdirSync(dir)) {
+              const pj = path.join(dir, sub, "package.json");
+              if (fs.existsSync(pj)) {
+                const n = JSON.parse(fs.readFileSync(pj, "utf8")).name;
+                if (n) wsMembers.add(n);
               }
             }
-            const offenders = [];
-            for (const dir of ["apps", "packages"]) {
-              if (!fs.existsSync(dir)) continue;
-              for (const sub of fs.readdirSync(dir)) {
-                const pj = path.join(dir, sub, "package.json");
-                if (!fs.existsSync(pj)) continue;
-                const pkg = JSON.parse(fs.readFileSync(pj, "utf8"));
-                for (const dt of ["dependencies","devDependencies","peerDependencies"]) {
-                  for (const [name, ver] of Object.entries(pkg[dt] || {})) {
-                    if (typeof ver === "string" && ver.startsWith("workspace:")) {
-                      if (!wsMembers.has(name)) {
-                        offenders.push(pj + ": " + dt + "." + name + "=" + ver);
-                      }
+          }
+          const offenders = [];
+          for (const dir of ["apps", "packages"]) {
+            if (!fs.existsSync(dir)) continue;
+            for (const sub of fs.readdirSync(dir)) {
+              const pj = path.join(dir, sub, "package.json");
+              if (!fs.existsSync(pj)) continue;
+              const pkg = JSON.parse(fs.readFileSync(pj, "utf8"));
+              for (const dt of ["dependencies","devDependencies","peerDependencies"]) {
+                for (const [name, ver] of Object.entries(pkg[dt] || {})) {
+                  if (typeof ver === "string" && ver.startsWith("workspace:")) {
+                    if (!wsMembers.has(name)) {
+                      offenders.push(pj + ": " + dt + "." + name + "=" + ver);
                     }
                   }
                 }
               }
             }
-            if (offenders.length) {
-              console.error("::error::dangling workspace:* refs in scaffold (no matching workspace member):");
-              for (const o of offenders) console.error("  " + o);
-              process.exit(1);
-            }
-          '
-          pnpm install
-          # Build the calendar app — catches missing peer/runtime deps that
-          # `pnpm install` alone won't surface (e.g. core importing a peer
-          # dep that templates don't declare).
-          pnpm --filter ./apps/calendar build
-
+          }
+          if (offenders.length) {
+            console.error("::error::dangling workspace:* refs in scaffold (no matching workspace member):");
+            for (const o of offenders) console.error("  " + o);
+            process.exit(1);
+          }
+        '
+        pnpm install
+        # Build the calendar app — catches missing peer/runtime deps that
+        # `pnpm install` alone won't surface (e.g. core importing a peer
+        # dep that templates don't declare).
+        pnpm --filter ./apps/calendar build
   ssr-boot-smoke:
     name: SSR cold-start smoke
     needs: change-scope
@@ -830,46 +683,35 @@ jobs:
     env:
       SSR_BOOT_APPS: ${{ needs.change-scope.outputs.ssr_boot_apps }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      # Skip postinstall build chain here — core is built explicitly below so we
-      # control the exact build order and avoid redundant parallel builds.
-      - uses: ./.github/actions/setup-pnpm
-        with:
-          install: no-scripts
-
-      - name: Build recap CLI, AgentKit, core, Toolkit, and creative context
-        run: |
-          pnpm --filter @agent-native/recap-cli build
-          pnpm --filter @agent-native/agentkit build
-          pnpm --filter @agent-native/core build
-          pnpm --filter @agent-native/toolkit build
-          pnpm --filter @agent-native/creative-context build
-
-      - name: Build Content template (Cloudflare Workers preset)
-        if: contains(fromJSON(env.SSR_BOOT_APPS), 'content')
-        run: NITRO_PRESET=cloudflare_module pnpm --filter content build
-
-      - name: Build and import the affected Netlify SSR handlers
-        if: >-
-          contains(fromJSON(env.SSR_BOOT_APPS), 'plan') ||
-          contains(fromJSON(env.SSR_BOOT_APPS), 'clips') ||
-          contains(fromJSON(env.SSR_BOOT_APPS), 'assets')
-        run: |
-          mapfile -t apps < <(jq -r '.[] | select(. != "content")' <<< "$SSR_BOOT_APPS")
-          filters=()
-          for app in "${apps[@]}"; do filters+=(--filter "$app"); done
-          NITRO_PRESET=netlify pnpm "${filters[@]}" build
-          NETLIFY=true timeout 180 node scripts/ssr-boot-smoke.mjs "${apps[@]}"
-
-      - name: Build and import Plan SSR handlers (Vercel and AWS Lambda)
-        if: contains(fromJSON(env.SSR_BOOT_APPS), 'plan')
-        run: |
-          NITRO_PRESET=vercel pnpm --filter plan build
-          VERCEL=true timeout 120 node scripts/ssr-boot-smoke.mjs --preset vercel plan
-          NITRO_PRESET=aws-lambda pnpm --filter plan build
-          AWS_LAMBDA_FUNCTION_NAME=ssr-smoke timeout 120 node scripts/ssr-boot-smoke.mjs --preset aws-lambda plan
-
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+    - uses: ./.github/actions/setup-pnpm
+      with:
+        install: no-scripts
+    - name: Build recap CLI, AgentKit, core, Toolkit, and creative context
+      run: |
+        pnpm --filter @agent-native/recap-cli build
+        pnpm --filter @agent-native/agentkit build
+        pnpm --filter @agent-native/core build
+        pnpm --filter @agent-native/toolkit build
+        pnpm --filter @agent-native/creative-context build
+    - name: Build Content template (Cloudflare Workers preset)
+      if: contains(fromJSON(env.SSR_BOOT_APPS), 'content')
+      run: NITRO_PRESET=cloudflare_module pnpm --filter content build
+    - name: Build and import the affected Netlify SSR handlers
+      if: contains(fromJSON(env.SSR_BOOT_APPS), 'plan') || contains(fromJSON(env.SSR_BOOT_APPS), 'clips') || contains(fromJSON(env.SSR_BOOT_APPS), 'assets')
+      run: |
+        mapfile -t apps < <(jq -r '.[] | select(. != "content")' <<< "$SSR_BOOT_APPS")
+        filters=()
+        for app in "${apps[@]}"; do filters+=(--filter "$app"); done
+        NITRO_PRESET=netlify pnpm "${filters[@]}" build
+        NETLIFY=true timeout 180 node scripts/ssr-boot-smoke.mjs "${apps[@]}"
+    - name: Build and import Plan SSR handlers (Vercel and AWS Lambda)
+      if: contains(fromJSON(env.SSR_BOOT_APPS), 'plan')
+      run: |
+        NITRO_PRESET=vercel pnpm --filter plan build
+        VERCEL=true timeout 120 node scripts/ssr-boot-smoke.mjs --preset vercel plan
+        NITRO_PRESET=aws-lambda pnpm --filter plan build
+        AWS_LAMBDA_FUNCTION_NAME=ssr-smoke timeout 120 node scripts/ssr-boot-smoke.mjs --preset aws-lambda plan
   guards:
     name: Security guards
     needs: change-scope
@@ -877,97 +719,76 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          fetch-depth: 0
-
-      - uses: ./.github/actions/setup-pnpm
-        with:
-          install: no-scripts
-
-      - name: Test production deploy concurrency guard
-        run: pnpm test:netlify-prebuilt-workflow
-
-      - name: Test serverless function size baseline guard
-        run: pnpm test:function-size-baseline
-
-      - name: Test AgentKit stream ownership guard
-        run: pnpm test:agentkit-stream-ownership
-
-      - name: Test Neon transfer alert and offline backtest
-        run: pnpm test:neon-transfer-alert
-
-      - name: Build packages for source-backed guards
-        run: |
-          pnpm --filter @agent-native/recap-cli build
-          pnpm --filter @agent-native/agentkit build
-          pnpm --filter @agent-native/core build
-          pnpm --filter @agent-native/toolkit build
-          pnpm --filter @agent-native/creative-context build
-
-      - name: Test unbounded read guards
-        run: >-
-          pnpm exec tsx --test
-          scripts/guard-no-unbounded-table-reads.test.ts
-          scripts/guard-no-unscoped-queries.test.ts
-          scripts/guard-no-heavy-dashboard-list-reads.test.ts
-
-      - name: Run security guards
-        run: pnpm guards
-
-      - name: Run root script tests for this change
-        if: ${{ !cancelled() && needs.change-scope.outputs.script_tests != '[]' && needs.change-scope.outputs.script_tests != '' }}
-        env:
-          SCRIPT_TESTS: ${{ needs.change-scope.outputs.script_tests }}
-        run: |
-          set -euo pipefail
-          node_tests=()
-          vitest_tests=()
-          while IFS= read -r file; do
-            if grep -q -E "from ['\"]vitest['\"]" "$file"; then
-              vitest_tests+=("$file")
-            else
-              node_tests+=("$file")
-            fi
-          done < <(node -e 'for (const file of JSON.parse(process.env.SCRIPT_TESTS)) console.log(file)')
-          status=0
-          if ((${#node_tests[@]} > 0)); then
-            pnpm exec tsx --test "${node_tests[@]}" || status=1
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      with:
+        fetch-depth: 0
+    - uses: ./.github/actions/setup-pnpm
+      with:
+        install: no-scripts
+    - name: Test production deploy concurrency guard
+      run: pnpm test:netlify-prebuilt-workflow
+    - name: Test serverless function size baseline guard
+      run: pnpm test:function-size-baseline
+    - name: Test AgentKit stream ownership guard
+      run: pnpm test:agentkit-stream-ownership
+    - name: Test Neon transfer alert and offline backtest
+      run: pnpm test:neon-transfer-alert
+    - name: Build packages for source-backed guards
+      run: |
+        pnpm --filter @agent-native/recap-cli build
+        pnpm --filter @agent-native/agentkit build
+        pnpm --filter @agent-native/core build
+        pnpm --filter @agent-native/toolkit build
+        pnpm --filter @agent-native/creative-context build
+    - name: Test unbounded read guards
+      run: pnpm exec tsx --test scripts/guard-no-unbounded-table-reads.test.ts scripts/guard-no-unscoped-queries.test.ts scripts/guard-no-heavy-dashboard-list-reads.test.ts
+    - name: Run security guards
+      run: pnpm guards
+    - name: Run root script tests for this change
+      if: ${{ !cancelled() && needs.change-scope.outputs.script_tests != '[]' && needs.change-scope.outputs.script_tests != '' }}
+      env:
+        SCRIPT_TESTS: ${{ needs.change-scope.outputs.script_tests }}
+      run: |
+        set -euo pipefail
+        node_tests=()
+        vitest_tests=()
+        while IFS= read -r file; do
+          if grep -q -E "from ['\"]vitest['\"]" "$file"; then
+            vitest_tests+=("$file")
+          else
+            node_tests+=("$file")
           fi
-          if ((${#vitest_tests[@]} > 0)); then
-            pnpm exec vitest run "${vitest_tests[@]}" || status=1
-          fi
-          exit "$status"
-
-      # Source-only template checks: no DB, browser, network, or secrets.
-      - name: Template route matrix (fails on drift)
-        if: ${{ !cancelled() && needs.change-scope.outputs.qa_static == 'true' }}
-        run: pnpm qa:template-routes
-
-      - name: Template action audit (advisory)
-        if: ${{ !cancelled() && needs.change-scope.outputs.qa_static == 'true' }}
-        run: pnpm actions:audit
-
+        done < <(node -e 'for (const file of JSON.parse(process.env.SCRIPT_TESTS)) console.log(file)')
+        status=0
+        if ((${#node_tests[@]} > 0)); then
+          pnpm exec tsx --test "${node_tests[@]}" || status=1
+        fi
+        if ((${#vitest_tests[@]} > 0)); then
+          pnpm exec vitest run "${vitest_tests[@]}" || status=1
+        fi
+        exit "$status"
+    - name: Template route matrix (fails on drift)
+      if: ${{ !cancelled() && needs.change-scope.outputs.qa_static == 'true' }}
+      run: pnpm qa:template-routes
+    - name: Template action audit (advisory)
+      if: ${{ !cancelled() && needs.change-scope.outputs.qa_static == 'true' }}
+      run: pnpm actions:audit
   standalone-chat:
     name: Generate + run standalone Chat
     needs: change-scope
-    # Required check: run when selected, and also when change-scope did not
-    # succeed so the check fails closed instead of reporting "skipped".
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.agentkit_acceptance == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      AGENT_NATIVE_CREATE_USE_LOCAL_CORE: "1"
+      AGENT_NATIVE_CREATE_USE_LOCAL_CORE: '1'
     steps:
-      - name: Require a successful change scope
-        env:
-          CHANGE_SCOPE_RESULT: ${{ needs.change-scope.result }}
-        run: |
-          if [ "$CHANGE_SCOPE_RESULT" != "success" ]; then
-            echo "::error::change-scope did not succeed ($CHANGE_SCOPE_RESULT)"
-            exit 1
-          fi
-
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - uses: ./.github/actions/standalone-chat-acceptance
+    - name: Require a successful change scope
+      env:
+        CHANGE_SCOPE_RESULT: ${{ needs.change-scope.result }}
+      run: |
+        if [ "$CHANGE_SCOPE_RESULT" != "success" ]; then
+          echo "::error::change-scope did not succeed ($CHANGE_SCOPE_RESULT)"
+          exit 1
+        fi
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+    - uses: ./.github/actions/standalone-chat-acceptance

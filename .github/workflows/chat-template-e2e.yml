@@ -1,26 +1,18 @@
 name: Chat template E2E
-
-# Manual run of the standalone AgentKit Chat acceptance for any branch. Pull
-# requests run the same steps as the required "Generate + run standalone Chat"
-# job in ci.yml, gated by its change scope.
-on:
-  workflow_dispatch:
-
+'on':
+  workflow_dispatch: {}
 concurrency:
   group: chat-template-e2e-${{ github.ref }}
   cancel-in-progress: true
-
 permissions:
   contents: read
-
 jobs:
   standalone-chat:
     name: Standalone Chat acceptance (manual)
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      AGENT_NATIVE_CREATE_USE_LOCAL_CORE: "1"
+      AGENT_NATIVE_CREATE_USE_LOCAL_CORE: '1'
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - uses: ./.github/actions/standalone-chat-acceptance
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+    - uses: ./.github/actions/standalone-chat-acceptance

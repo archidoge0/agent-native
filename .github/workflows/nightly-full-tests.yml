@@ -1,38 +1,28 @@
 name: Nightly full fast-test suite
-
-on:
-  schedule:
-    - cron: "17 0,6,12,18 * * *"
-  workflow_dispatch:
-
+'on':
+  workflow_dispatch: {}
 concurrency:
   group: nightly-full-tests
   cancel-in-progress: true
-
 permissions:
   contents: read
-
 jobs:
   full-tests:
     name: Full fast-test suite
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - uses: ./.github/actions/setup-pnpm
-        with:
-          restore-dist-cache: "true"
-
-      - name: Restore Playwright browser cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: playwright-${{ runner.os }}-
-
-      - name: Install Playwright Chromium for browser-backed unit tests
-        run: pnpm exec playwright install --only-shell chromium
-
-      - name: Run full fast-test suite
-        run: pnpm test:fast
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+    - uses: ./.github/actions/setup-pnpm
+      with:
+        restore-dist-cache: 'true'
+    - name: Restore Playwright browser cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: playwright-${{ runner.os }}-
+    - name: Install Playwright Chromium for browser-backed unit tests
+      run: pnpm exec playwright install --only-shell chromium
+    - name: Run full fast-test suite
+      run: pnpm test:fast
