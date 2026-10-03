@@ -1,30 +1,7 @@
 name: Clips Desktop Release
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "templates/clips/desktop/**"
-      - "packages/shared-app-config/**"
   workflow_dispatch:
-    inputs:
-      channel:
-        description: "Release channel"
-        required: true
-        default: production
-        type: choice
-        options:
-          - production
-          - nightly
-      version:
-        description: "Stable version to release (e.g. 0.2.0). Required for production; Nightly may use the package.json version."
-        required: false
-        type: string
-      source_ref:
-        description: "Exact source commit to build for a coordinated release"
-        required: false
-        type: string
-
 permissions:
   contents: write
 

@@ -1,25 +1,7 @@
 name: Email deployment and release failures
 
 on:
-  workflow_run:
-    workflows:
-      - Deploy Agent-Native beta sites from GitHub
-      - Deploy Agent-Native beta sites
-      - Deploy Agent-Native docs site from GitHub
-      - Deploy Agent-Native production sites from GitHub
-      - Pilot prebuilt Netlify deploy
-      - Promote Netlify deploy
-      - Manage Agent-Native production sites
-      - Push chat template to starter
-      - Publish packages
-      - "🚀 Release everything"
-      - Desktop App Release
-      - Clips Desktop Release
-      - Desktop SSO Canary
-      - Publish MCP Registry servers
-      - Nightly full fast-test suite
-    types: [completed]
-
+  workflow_dispatch:
 permissions:
   contents: read
 

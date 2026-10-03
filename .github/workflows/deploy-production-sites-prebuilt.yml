@@ -3,28 +3,6 @@ run-name: Deploy Agent-Native production sites `${{ inputs.sites }}`
 
 on:
   workflow_dispatch:
-    inputs:
-      sites:
-        description: all repo-backed sites, or comma-separated ids such as clips,design
-        required: true
-        type: string
-        default: all
-      source_ref:
-        description: Optional exact commit SHA; blank uses the latest main commit
-        required: false
-        type: string
-        default: ""
-      beta_e2e:
-        description: "Run the beta browser E2E gate before publishing (opt-in; off by default so it can never block a deploy you did not ask it to gate)"
-        required: false
-        default: false
-        type: boolean
-      smoke:
-        description: Probe each production host after publishing
-        required: true
-        type: boolean
-        default: true
-
 permissions:
   contents: read
 

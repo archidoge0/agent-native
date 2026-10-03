@@ -1,15 +1,7 @@
 name: Push chat template to starter
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "templates/chat/**"
-      - ".github/workflows/push-starter-template.yml"
-  repository_dispatch:
-    types: [agent-native-packages-published]
   workflow_dispatch:
-
 permissions:
   contents: read
 

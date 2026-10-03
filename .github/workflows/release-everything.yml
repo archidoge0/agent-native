@@ -1,23 +1,7 @@
 name: 🚀 Release everything
 
 on:
-  schedule:
-    - cron: "0 12 * * 1-4"
-      timezone: "America/Los_Angeles"
-    - cron: "0 10 * * 5"
-      timezone: "America/Los_Angeles"
   workflow_dispatch:
-    inputs:
-      releaseType:
-        description: Stable npm release bump
-        required: true
-        type: choice
-        options:
-          - patch
-          - minor
-          - major
-        default: patch
-
 permissions:
   actions: write
   contents: write

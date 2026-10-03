@@ -2,15 +2,6 @@ name: Trusted acceptance reaper
 
 on:
   workflow_dispatch:
-    inputs:
-      workspace:
-        description: Declarative acceptance workspace to reconcile
-        required: true
-        type: string
-        default: calendar-content
-  schedule:
-    - cron: "17 * * * *"
-
 permissions:
   contents: read
 

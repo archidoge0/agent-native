@@ -2,13 +2,6 @@ name: Publish MCP Registry servers
 
 on:
   workflow_dispatch:
-    inputs:
-      server:
-        description: Public app slug to publish, or all
-        required: true
-        type: string
-        default: all
-
 permissions: {}
 
 concurrency:

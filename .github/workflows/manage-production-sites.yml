@@ -2,31 +2,6 @@ name: Manage Agent-Native production sites
 
 on:
   workflow_dispatch:
-    inputs:
-      operation:
-        description: Production operation
-        required: true
-        type: choice
-        default: deploy-main
-        options:
-          - deploy-main
-          - rollback
-      sites:
-        description: all, or comma-separated site ids (for example clips,design)
-        required: true
-        type: string
-        default: all
-      rollback_depth:
-        description: Number of prior production deploys to skip (1 means previous)
-        required: true
-        type: string
-        default: "1"
-      rollback_deploy_id:
-        description: Exact Netlify Deploy ID; overrides depth and requires one site
-        required: false
-        type: string
-        default: ""
-
 permissions:
   contents: read
 

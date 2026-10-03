@@ -11,19 +11,7 @@ name: Signup agent review (scheduled)
 # or page. Keeping it out of the gating workflow means a model outage or a
 # noisy review can never block a merge or wake anyone.
 on:
-  schedule:
-    - cron: "15 17 * * *"
   workflow_dispatch:
-    inputs:
-      apps:
-        description: "Comma-separated apps, or 'all'. Default rotates one app per day."
-        required: false
-        default: ""
-      environments:
-        description: "Comma-separated environments: beta,production"
-        required: false
-        default: "beta"
-
 concurrency:
   group: signup-agent-scheduled
   cancel-in-progress: false

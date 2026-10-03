@@ -1,9 +1,7 @@
 name: PR Visual Recap
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, labeled, closed]
-
+  workflow_dispatch:
 permissions:
   contents: read
 

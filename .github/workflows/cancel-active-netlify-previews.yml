@@ -2,22 +2,6 @@ name: Cancel active Netlify previews
 
 on:
   workflow_dispatch:
-    inputs:
-      branch:
-        description: Optional preview branch to cancel. Leave blank to cancel all active previews.
-        required: false
-        type: string
-      max_age_minutes:
-        description: Only cancel previews at least this old. Use 0 to cancel any age.
-        required: false
-        type: string
-        default: "0"
-      dry_run:
-        description: List matching previews without canceling them
-        required: false
-        type: boolean
-        default: false
-
 permissions:
   contents: read
 

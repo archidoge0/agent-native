@@ -1,31 +1,7 @@
 name: Deploy app workspace bundle
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/deploy-community-app-workspace.yml"
-      - "community-templates/**"
-      - "packages/**"
-      - "scripts/prebuild-workspace-packages.ts"
-      - ".nvmrc"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - "tsconfig*.json"
-  schedule:
-    - cron: "0 19,20 * * 1-5"
   workflow_dispatch:
-    inputs:
-      lane:
-        description: Site to publish
-        required: true
-        type: choice
-        default: beta
-        options:
-          - beta
-          - production
-
 permissions:
   contents: read
 

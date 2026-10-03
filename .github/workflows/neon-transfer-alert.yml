@@ -1,21 +1,7 @@
 name: Neon daily transfer alert
 
 on:
-  schedule:
-    - cron: "15 9 * * *"
   workflow_dispatch:
-    inputs:
-      send_alerts:
-        description: Send matching alerts to Slack
-        required: false
-        default: false
-        type: boolean
-      backtest_live:
-        description: Backtest the last 28 complete days with Neon history, without posting to Slack
-        required: false
-        default: false
-        type: boolean
-
 permissions:
   contents: read
 

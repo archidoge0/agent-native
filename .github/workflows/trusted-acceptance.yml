@@ -2,34 +2,6 @@ name: Trusted acceptance
 
 on:
   workflow_dispatch:
-    inputs:
-      workspace:
-        description: Declarative acceptance workspace
-        required: true
-        type: string
-        default: calendar-content
-      pull_request:
-        description: Open same-repository pull request number
-        required: false
-        type: string
-      sha:
-        description: Full current pull request head SHA
-        required: false
-        type: string
-      rollback_sha:
-        description: Optional prior known-good full SHA to redeploy
-        required: false
-        type: string
-      rollback_run_id:
-        description: Prior passing trusted-acceptance run containing rollback receipt
-        required: false
-        type: string
-      deploy:
-        description: Deploy after planning and secretless builds
-        required: true
-        type: boolean
-        default: false
-
 permissions:
   actions: read
   contents: read

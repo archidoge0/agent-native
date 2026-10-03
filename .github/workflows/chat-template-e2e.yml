@@ -5,7 +5,6 @@ name: Chat template E2E
 # job in ci.yml, gated by its change scope.
 on:
   workflow_dispatch:
-
 concurrency:
   group: chat-template-e2e-${{ github.ref }}
   cancel-in-progress: true

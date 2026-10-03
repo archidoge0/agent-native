@@ -2,7 +2,6 @@ name: Publish Clips Chrome extension
 
 on:
   workflow_dispatch:
-
 concurrency:
   # ponytail: one Store item, so a global lock is enough; split by item if this expands.
   group: clips-chrome-extension-publish

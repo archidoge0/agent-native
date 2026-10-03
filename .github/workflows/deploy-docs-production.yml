@@ -1,33 +1,7 @@
 name: Deploy Agent-Native docs site from GitHub
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".nvmrc"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - "packages/core/**"
-      - "packages/docs/**"
-      - "scripts/netlify-prebuilt-target.ts"
-      - "scripts/netlify-migration-url.ts"
-      - "scripts/netlify-production-sites.json"
-      - ".github/workflows/deploy-docs-production.yml"
-      - ".github/workflows/deploy-netlify-prebuilt.yml"
   workflow_dispatch:
-    inputs:
-      source_ref:
-        description: Optional exact commit SHA; blank uses the selected ref
-        required: false
-        type: string
-        default: ""
-      smoke:
-        description: Probe www.agent-native.com after publishing
-        required: true
-        type: boolean
-        default: true
-
 permissions:
   contents: read
 

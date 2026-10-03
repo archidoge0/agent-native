@@ -1,10 +1,7 @@
 name: Design E2E (browser)
 
 on:
-  schedule:
-    - cron: "37 9 * * *"
-  workflow_dispatch: {}
-
+  workflow_dispatch:
 concurrency:
   group: design-e2e
   cancel-in-progress: true

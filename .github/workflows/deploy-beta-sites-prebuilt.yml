@@ -1,22 +1,7 @@
 name: Deploy Agent-Native beta sites from GitHub
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - ".changeset/**"
   workflow_dispatch:
-    inputs:
-      source_ref:
-        description: Optional main SHA to publish; blank uses the latest main
-        required: false
-        type: string
-        default: ""
-      handoff:
-        description: Requeue the latest main source after a production operation
-        required: false
-        type: boolean
-        default: false
 permissions:
   contents: read
   actions: read
