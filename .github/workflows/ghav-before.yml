@@ -1,0 +1,112 @@
+name: "ghav before: CI"
+"on":
+  push:
+    branches:
+      - ghav/dev/4170
+    paths:
+      - .ghav/before
+permissions:
+  contents: read
+jobs:
+  change-scope:
+    name: Determine change scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.scope.outputs.docs_only }}
+      full: ${{ steps.scope.outputs.full }}
+      lint: ${{ steps.scope.outputs.lint }}
+      typecheck: ${{ steps.scope.outputs.typecheck }}
+      workspace_filters: ${{ steps.scope.outputs.workspace_filters }}
+      fast_tests: ${{ steps.scope.outputs.fast_tests }}
+      content: ${{ steps.scope.outputs.content }}
+      core_integration: ${{ steps.scope.outputs.core_integration }}
+      plan_e2e: ${{ steps.scope.outputs.plan_e2e }}
+      brain_evals: ${{ steps.scope.outputs.brain_evals }}
+      brain_privacy: ${{ steps.scope.outputs.brain_privacy }}
+      build: ${{ steps.scope.outputs.build }}
+      trusted_acceptance: ${{ steps.scope.outputs.trusted_acceptance }}
+      scaffold: ${{ steps.scope.outputs.scaffold }}
+      ssr_boot: ${{ steps.scope.outputs.ssr_boot }}
+      guards: ${{ steps.scope.outputs.guards }}
+      drizzle: ${{ steps.scope.outputs.drizzle }}
+      qa_static: ${{ steps.scope.outputs.qa_static }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+      - name: Test change scope classifier
+        run: node --experimental-strip-types --test scripts/ci-change-scope.test.ts
+  discover-lanes:
+    name: Plan test lanes
+    needs: change-scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ contains(github.workflow_ref, '/ghav-human.yml@') && '{"include":[{"lane":"lane-1","filters":"--filter design","packages":["design"],"files":697,"coreShard":"3/5"},{"lane":"lane-2","filters":"--filter analytics --filter @agent-native/dispatch --filter factory --filter crm --filter tasks --filter @agent-native/mobile-app --filter @agent-native/agent-chrome-extension --filter @agent-native/code-agents-ui --filter macros","packages":["analytics","@agent-native/dispatch","factory","crm","tasks","@agent-native/mobile-app","@agent-native/agent-chrome-extension","@agent-native/code-agents-ui","macros"],"files":658,"coreShard":"5/5"},{"lane":"lane-3","filters":"--filter clips --filter calendar --filter assets --filter forms --filter @agent-native/agent-browser-extension --filter @agent-native/pinpoint --filter @agent-native/example-chat-antd --filter @agent-native/browser-control-extension-core --filter agent-native","packages":["clips","calendar","assets","forms","@agent-native/agent-browser-extension","@agent-native/pinpoint","@agent-native/example-chat-antd","@agent-native/browser-control-extension-core","agent-native"],"files":657,"coreShard":"4/5"},{"lane":"lane-4","filters":"--filter content --filter plan --filter mail --filter @agent-native/toolkit --filter brain --filter clips-chrome-extension --filter dispatch --filter @agent-native/migrate --filter @agent-native/embedding --filter @agent-native/recap-cli","packages":["content","plan","mail","@agent-native/toolkit","brain","clips-chrome-extension","dispatch","@agent-native/migrate","@agent-native/embedding","@agent-native/recap-cli"],"files":657,"coreShard":"2/5"},{"lane":"lane-5","filters":"--filter slides --filter @agent-native/desktop-app --filter @agent-native/docs --filter @agent-native/creative-context --filter clips-desktop --filter @agent-native/scheduling --filter @agent-native/skills --filter @agent-native/example-chat-mui --filter chat","packages":["slides","@agent-native/desktop-app","@agent-native/docs","@agent-native/creative-context","clips-desktop","@agent-native/scheduling","@agent-native/skills","@agent-native/example-chat-mui","chat"],"files":657,"coreShard":"1/5"}]}' || '{"include":[{"lane":"lane-1","filters":"--filter design","packages":["design"],"files":506},{"lane":"lane-2","filters":"--filter content --filter plan --filter mail --filter @agent-native/toolkit --filter brain --filter clips-chrome-extension --filter dispatch --filter @agent-native/migrate --filter @agent-native/browser-control-extension-core --filter @agent-native/recap-cli --filter macros","packages":["content","plan","mail","@agent-native/toolkit","brain","clips-chrome-extension","dispatch","@agent-native/migrate","@agent-native/browser-control-extension-core","@agent-native/recap-cli","macros"],"files":466},{"lane":"lane-3","filters":"--filter analytics --filter @agent-native/dispatch --filter factory --filter crm --filter tasks --filter @agent-native/mobile-app --filter @agent-native/agent-chrome-extension --filter @agent-native/code-agents-ui","packages":["analytics","@agent-native/dispatch","factory","crm","tasks","@agent-native/mobile-app","@agent-native/agent-chrome-extension","@agent-native/code-agents-ui"],"files":466},{"lane":"lane-4","filters":"--filter clips --filter calendar --filter assets --filter forms --filter @agent-native/scheduling --filter @agent-native/skills --filter @agent-native/example-chat-mui --filter @agent-native/embedding --filter agent-native","packages":["clips","calendar","assets","forms","@agent-native/scheduling","@agent-native/skills","@agent-native/example-chat-mui","@agent-native/embedding","agent-native"],"files":466},{"lane":"lane-5","filters":"--filter slides --filter @agent-native/desktop-app --filter @agent-native/docs --filter @agent-native/creative-context --filter clips-desktop --filter @agent-native/agent-browser-extension --filter @agent-native/pinpoint --filter @agent-native/example-chat-antd --filter chat","packages":["slides","@agent-native/desktop-app","@agent-native/docs","@agent-native/creative-context","clips-desktop","@agent-native/agent-browser-extension","@agent-native/pinpoint","@agent-native/example-chat-antd","chat"],"files":465}]}' }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+      - name: Partition non-core test packages into lanes
+        id: plan
+        run: node --experimental-strip-types scripts/ci-test-lanes.ts
+  test-core:
+    name: Fast tests core
+    needs: change-scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Restore dist + tsBuildInfo cache
+        uses: ./.github/actions/restore-dist-cache
+      - run: pnpm install --frozen-lockfile
+      - name: Restore Playwright browser cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-${{ runner.os }}-
+      - name: Install Playwright Chromium for browser-backed unit tests
+        run: pnpm exec playwright install --only-shell chromium
+      - name: Run core fast tests (uncapped)
+        run: pnpm --filter @agent-native/core exec vitest run --dir src --exclude "**/*.db.test.ts" --exclude "**/*.integration.spec.ts" --exclude "**/*.integration.test.ts" --exclude "**/*.e2e.spec.ts" --exclude "**/*.e2e.test.ts" --exclude "**/e2e/**" --exclude "**/*.live.spec.ts" --exclude "**/*.live.test.ts" --exclude "**/*.perf.spec.ts" --exclude "**/*.perf.test.ts" --exclude "**/create-e2e.spec.ts"
+  test-rest:
+    name: Fast tests ${{ matrix.lane }}
+    needs:
+      - change-scope
+      - discover-lanes
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover-lanes.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Restore dist + tsBuildInfo cache
+        uses: ./.github/actions/restore-dist-cache
+      - run: pnpm install --frozen-lockfile
+      - name: Restore Playwright browser cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-${{ runner.os }}-
+      - name: Install Playwright Chromium for browser-backed unit tests
+        run: pnpm exec playwright install --only-shell chromium
+      - name: Run fast tests for lane
+        run: pnpm -r --no-bail --workspace-concurrency=1 ${{ matrix.filters }} run test --exclude "**/*.db.test.ts" --exclude "**/*.integration.spec.ts" --exclude "**/*.integration.test.ts" --exclude "**/*.e2e.spec.ts" --exclude "**/*.e2e.test.ts" --exclude "**/e2e/**" --exclude "**/*.live.spec.ts" --exclude "**/*.live.test.ts" --exclude "**/*.perf.spec.ts" --exclude "**/*.perf.test.ts" --exclude "**/create-e2e.spec.ts"
